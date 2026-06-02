@@ -1,19 +1,18 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts"
+import { TrendingUp, Plus, Trash2, ChevronRight, ArrowDownLeft } from "lucide-react"
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
-} from "recharts"
-import { PiggyBank, Plus, Trash2, ChevronRight } from "lucide-react"
-import {
-  formatCurrency, formatDate, formatPercent, SAVING_TYPES, CATEGORY_COLORS,
+  formatCurrency, formatDate, formatPercent, SAVING_TYPES,
   calculateSavingCurrentValue, generateSavingGrowthData,
 } from "@/lib/utils"
 
+interface Wallet { id: string; name: string; color: string; balance: number }
 interface SavingDeposit {
   id: string; savingId: string; amount: number; note: string | null; date: string
+  wallet: { id: string; name: string; color: string } | null
 }
-
 interface Saving {
   id: string; name: string; institution: string | null
   type: string; interestRate: number; color: string
@@ -33,8 +32,8 @@ const GrowthTooltip = ({ active, payload, label }: { active?: boolean; payload?:
           <span className="text-white font-medium">{formatCurrency(p.value)}</span>
         </div>
       ))}
-      {payload.length === 2 && (
-        <div className="text-xs mt-1 pt-1" style={{ borderTop: "1px solid rgba(255,255,255,0.1)", color: "#10B981" }}>
+      {payload.length === 2 && payload[1].value > payload[0].value && (
+        <div className="text-xs mt-1 pt-1 text-emerald-400" style={{ borderTop: "1px solid rgba(255,255,255,0.1)" }}>
           Intereses: {formatCurrency(payload[1].value - payload[0].value)}
         </div>
       )}
@@ -44,25 +43,28 @@ const GrowthTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 
 export default function AhorrosPage() {
   const [savings, setSavings] = useState<Saving[]>([])
+  const [wallets, setWallets] = useState<Wallet[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showSavingForm, setShowSavingForm] = useState(false)
+  const [mode, setMode] = useState<"deposit" | "withdraw">("deposit")
   const [depositForm, setDepositForm] = useState({
-    amount: "", note: "", date: new Date().toISOString().split("T")[0],
+    amount: "", note: "", date: new Date().toISOString().split("T")[0], walletId: "",
   })
   const [savingForm, setSavingForm] = useState({
     name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0",
   })
 
   const fetchData = () => {
-    fetch("/api/savings")
-      .then((r) => r.json())
-      .then((data: Saving[]) => {
-        setSavings(data)
-        if (!selected && data.length > 0) setSelected(data[0].id)
-      })
-      .finally(() => setLoading(false))
+    Promise.all([
+      fetch("/api/savings").then((r) => r.json()),
+      fetch("/api/wallets").then((r) => r.json()),
+    ]).then(([s, w]) => {
+      setSavings(s)
+      setWallets(w)
+      if (!selected && s.length > 0) setSelected(s[0].id)
+    }).finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchData() }, [])
@@ -84,40 +86,42 @@ export default function AhorrosPage() {
     } finally { setSubmitting(false) }
   }
 
-  const handleAddDeposit = async (e: React.FormEvent) => {
+  const handleAddMovement = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selected || !depositForm.amount) return
+    const rawAmount = parseFloat(depositForm.amount)
+    if (!rawAmount || rawAmount <= 0) return
     setSubmitting(true)
+    const amount = mode === "withdraw" ? -rawAmount : rawAmount
     try {
       await fetch(`/api/savings/${selected}/deposits`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(depositForm),
+        body: JSON.stringify({ ...depositForm, amount }),
       })
-      setDepositForm({ amount: "", note: "", date: new Date().toISOString().split("T")[0] })
+      setDepositForm({ amount: "", note: "", date: new Date().toISOString().split("T")[0], walletId: depositForm.walletId })
       fetchData()
     } finally { setSubmitting(false) }
   }
 
   const handleDeleteDeposit = async (savingId: string, depositId: string) => {
-    if (!confirm("¿Eliminar este depósito?")) return
+    if (!confirm("¿Eliminar este movimiento? El saldo de la cartera vinculada se ajustará.")) return
     await fetch(`/api/savings/${savingId}/deposits/${depositId}`, { method: "DELETE" })
     fetchData()
   }
 
   const handleDeleteSaving = async (id: string) => {
-    if (!confirm("¿Eliminar esta cuenta de ahorro y todos sus depósitos?")) return
+    if (!confirm("¿Eliminar este fondo y todos sus movimientos?")) return
     await fetch(`/api/savings/${id}`, { method: "DELETE" })
     setSavings((prev) => prev.filter((s) => s.id !== id))
     setSelected(savings.find((s) => s.id !== id)?.id ?? null)
   }
 
   const selectedSaving = savings.find((s) => s.id === selected)
-  const totalSavings = savings.reduce((sum, s) => sum + calculateSavingCurrentValue(s.deposits, s.interestRate), 0)
+  const totalValue = savings.reduce((sum, s) => sum + calculateSavingCurrentValue(s.deposits, s.interestRate), 0)
   const totalPrincipal = savings.reduce((sum, s) => sum + s.deposits.reduce((d, dep) => d + dep.amount, 0), 0)
-  const totalInterest = totalSavings - totalPrincipal
+  const totalInterest = totalValue - totalPrincipal
 
-  // Growth data for selected account
   const growthData = selectedSaving
     ? generateSavingGrowthData(
         selectedSaving.deposits.map((d) => ({ amount: d.amount, date: d.date })),
@@ -146,12 +150,14 @@ export default function AhorrosPage() {
       <div className="mb-8 flex items-start justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-            <PiggyBank style={{ color: "#6366F1" }} /> Mis Ahorros
+            <TrendingUp style={{ color: "#6366F1" }} /> Fondos de Inversión
           </h1>
-          <p style={{ color: "#64748B" }} className="mt-1">Registra depósitos y visualiza el crecimiento con intereses</p>
+          <p style={{ color: "#64748B" }} className="mt-1">
+            Controla depósitos, retiros e intereses de cada fondo. Vincula con tus carteras.
+          </p>
         </div>
         <button onClick={() => setShowSavingForm(!showSavingForm)} className="btn-primary flex items-center gap-2 text-sm">
-          <Plus size={16} /> Nueva Cuenta
+          <Plus size={16} /> Nuevo Fondo
         </button>
       </div>
 
@@ -159,13 +165,13 @@ export default function AhorrosPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="stat-card p-5">
           <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Valor total</div>
-          <div className="text-2xl font-bold text-white">{formatCurrency(totalSavings)}</div>
+          <div className="text-2xl font-bold text-white">{formatCurrency(totalValue)}</div>
           <div className="text-xs mt-1 text-emerald-400">Con intereses</div>
         </div>
         <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Capital invertido</div>
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Capital neto</div>
           <div className="text-2xl font-bold text-white">{formatCurrency(totalPrincipal)}</div>
-          <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Depósitos reales</div>
+          <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Depósitos − retiros</div>
         </div>
         <div className="stat-card p-5">
           <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Intereses ganados</div>
@@ -173,7 +179,7 @@ export default function AhorrosPage() {
           <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Dinero extra</div>
         </div>
         <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Cuentas activas</div>
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Fondos activos</div>
           <div className="text-2xl font-bold text-white">{savings.length}</div>
           <div className="text-xs mt-1 text-emerald-400">
             {totalPrincipal > 0 ? `+${formatPercent((totalInterest / totalPrincipal) * 100)} rendimiento` : ""}
@@ -184,7 +190,7 @@ export default function AhorrosPage() {
       {/* New Saving Form */}
       {showSavingForm && (
         <div className="glass-card rounded-2xl p-6 mb-6 fade-in">
-          <h2 className="text-lg font-semibold text-white mb-4">Agregar Cuenta de Ahorro</h2>
+          <h2 className="text-lg font-semibold text-white mb-4">Nuevo Fondo de Inversión</h2>
           <form onSubmit={handleCreateSaving}>
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
               <div>
@@ -204,7 +210,7 @@ export default function AhorrosPage() {
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tasa interés anual (%)</label>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tasa de interés anual (%)</label>
                 <input type="number" step="0.01" min="0" max="100" className="input-dark" placeholder="0.00"
                   value={savingForm.interestRate} onChange={(e) => setSavingForm({ ...savingForm, interestRate: e.target.value })} />
               </div>
@@ -213,7 +219,7 @@ export default function AhorrosPage() {
               <button type="submit" disabled={submitting}
                 className="py-2.5 px-6 rounded-xl font-semibold text-white"
                 style={{ background: "linear-gradient(135deg, #4F46E5, #6366F1)" }}>
-                {submitting ? "Creando..." : "Crear Cuenta"}
+                {submitting ? "Creando..." : "Crear Fondo"}
               </button>
               <button type="button" onClick={() => setShowSavingForm(false)}
                 className="py-2.5 px-6 rounded-xl font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#94A3B8" }}>
@@ -226,16 +232,16 @@ export default function AhorrosPage() {
 
       {savings.length === 0 ? (
         <div className="text-center py-20">
-          <div className="text-6xl mb-4">💰</div>
-          <div className="text-xl font-semibold text-white mb-2">Sin cuentas de ahorro</div>
-          <p style={{ color: "#64748B" }} className="mb-6">Crea tu primera cuenta para empezar a rastrear tus depósitos e intereses</p>
-          <button onClick={() => setShowSavingForm(true)} className="btn-primary">Crear cuenta de ahorro</button>
+          <div className="text-6xl mb-4">📈</div>
+          <div className="text-xl font-semibold text-white mb-2">Sin fondos de inversión</div>
+          <p style={{ color: "#64748B" }} className="mb-6">Crea tu primer fondo y empieza a rastrear tus depósitos e intereses</p>
+          <button onClick={() => setShowSavingForm(true)} className="btn-primary">Crear fondo</button>
         </div>
       ) : (
         <div className="grid lg:grid-cols-4 gap-6">
-          {/* Left: Account List */}
+          {/* Left: Fund List */}
           <div className="lg:col-span-1 space-y-2">
-            <div className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "#64748B" }}>Cuentas</div>
+            <div className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "#64748B" }}>Fondos</div>
             {savings.map((s) => {
               const value = calculateSavingCurrentValue(s.deposits, s.interestRate)
               const principal = s.deposits.reduce((sum, d) => sum + d.amount, 0)
@@ -267,7 +273,7 @@ export default function AhorrosPage() {
             })}
           </div>
 
-          {/* Right: Selected Account Detail */}
+          {/* Right: Selected Fund Detail */}
           {selectedSaving && (
             <div className="lg:col-span-3 space-y-5">
               {/* Header */}
@@ -289,10 +295,9 @@ export default function AhorrosPage() {
                     <Trash2 size={13} />
                   </button>
                 </div>
-
                 <div className="grid grid-cols-3 gap-4 mt-4">
                   <div>
-                    <div className="text-xs mb-1" style={{ color: "#64748B" }}>Capital invertido</div>
+                    <div className="text-xs mb-1" style={{ color: "#64748B" }}>Capital neto</div>
                     <div className="text-xl font-bold text-white">{formatCurrency(selectedPrincipal)}</div>
                   </div>
                   <div>
@@ -304,7 +309,7 @@ export default function AhorrosPage() {
                     <div className="text-xl font-bold text-indigo-400">{formatCurrency(selectedInterest)}</div>
                     {selectedPrincipal > 0 && (
                       <div className="text-xs text-emerald-400">
-                        +{formatPercent((selectedInterest / selectedPrincipal) * 100)}
+                        +{formatPercent((selectedInterest / Math.max(0.01, selectedPrincipal)) * 100)}
                       </div>
                     )}
                   </div>
@@ -314,22 +319,20 @@ export default function AhorrosPage() {
               {/* Growth Chart */}
               {growthData.length > 1 && (
                 <div className="glass-card rounded-2xl p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-base font-semibold text-white">Crecimiento de la cuenta</h3>
-                      <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
-                        Histórico + proyección 12 meses · Zona sombreada = intereses ganados
-                      </p>
-                    </div>
+                  <div className="mb-4">
+                    <h3 className="text-base font-semibold text-white">Crecimiento del fondo</h3>
+                    <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
+                      Histórico + proyección 12 meses · Zona verde = intereses sobre tu capital
+                    </p>
                   </div>
-                  <ResponsiveContainer width="100%" height={220}>
+                  <ResponsiveContainer width="100%" height={210}>
                     <AreaChart data={growthData} margin={{ top: 5, right: 5, bottom: 0, left: 5 }}>
                       <defs>
-                        <linearGradient id="principalGrad" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="principalGrad2" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#6366F1" stopOpacity={0.3} />
                           <stop offset="95%" stopColor="#6366F1" stopOpacity={0.05} />
                         </linearGradient>
-                        <linearGradient id="valueGrad" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="valueGrad2" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
                           <stop offset="95%" stopColor="#10B981" stopOpacity={0.05} />
                         </linearGradient>
@@ -341,70 +344,123 @@ export default function AhorrosPage() {
                       <Tooltip content={<GrowthTooltip />} />
                       <ReferenceLine x={nowLabel} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4"
                         label={{ value: "Hoy", position: "top", fill: "#94A3B8", fontSize: 10 }} />
-                      <Area type="monotone" dataKey="principal" name="Capital aportado"
-                        stroke="#6366F1" fill="url(#principalGrad)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="principal" name="Capital neto"
+                        stroke="#6366F1" fill="url(#principalGrad2)" strokeWidth={2} />
                       <Area type="monotone" dataKey="value" name="Valor con intereses"
-                        stroke="#10B981" fill="url(#valueGrad)" strokeWidth={2} />
+                        stroke="#10B981" fill="url(#valueGrad2)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                   <div className="flex gap-5 mt-2">
-                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "#94A3B8" }}>
-                      <div className="w-3 h-1.5 rounded" style={{ background: "#6366F1" }} /> Capital aportado
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "#94A3B8" }}>
-                      <div className="w-3 h-1.5 rounded" style={{ background: "#10B981" }} /> Valor con intereses
-                    </div>
+                    {[
+                      { color: "#6366F1", label: "Capital neto (depósitos − retiros)" },
+                      { color: "#10B981", label: "Valor con intereses" },
+                    ].map((l) => (
+                      <div key={l.label} className="flex items-center gap-1.5 text-xs" style={{ color: "#94A3B8" }}>
+                        <div className="w-3 h-1.5 rounded" style={{ background: l.color }} /> {l.label}
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* Add Deposit */}
+              {/* Deposit / Withdraw Form */}
               <div className="glass-card rounded-2xl p-5">
+                {/* Mode toggle */}
+                <div className="flex gap-2 mb-4 p-1 rounded-xl w-fit"
+                  style={{ background: "rgba(6,13,31,0.8)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  {([
+                    { key: "deposit", label: "📥 Depositar", color: "#10B981" },
+                    { key: "withdraw", label: "📤 Retirar", color: "#EF4444" },
+                  ] as const).map(({ key, label, color }) => (
+                    <button key={key} onClick={() => setMode(key)}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold transition-all"
+                      style={{
+                        background: mode === key ? `${color}20` : "transparent",
+                        color: mode === key ? color : "#64748B",
+                        border: mode === key ? `1px solid ${color}30` : "1px solid transparent",
+                      }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
                 <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-                  <Plus size={16} style={{ color: "#10B981" }} /> Registrar Depósito
+                  {mode === "deposit"
+                    ? <><Plus size={16} style={{ color: "#10B981" }} /> Registrar Depósito</>
+                    : <><ArrowDownLeft size={16} style={{ color: "#EF4444" }} /> Registrar Retiro</>
+                  }
                 </h3>
-                <form onSubmit={handleAddDeposit}>
-                  <div className="grid md:grid-cols-3 gap-4 mb-4">
+
+                <form onSubmit={handleAddMovement}>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                     <div>
-                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Monto *</label>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
+                        Monto *
+                      </label>
                       <input type="number" step="0.01" min="0" required className="input-dark" placeholder="$0.00"
                         value={depositForm.amount} onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })} />
                     </div>
                     <div>
-                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Fecha del depósito *</label>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
+                        {mode === "deposit" ? "Proviene de la cartera" : "Llega a la cartera"}
+                      </label>
+                      <select className="input-dark" value={depositForm.walletId}
+                        onChange={(e) => setDepositForm({ ...depositForm, walletId: e.target.value })}>
+                        <option value="">Sin vincular</option>
+                        {wallets.map((w) => (
+                          <option key={w.id} value={w.id}>{w.name} — {formatCurrency(w.balance)}</option>
+                        ))}
+                      </select>
+                      {depositForm.walletId && (
+                        <div className="text-xs mt-1" style={{ color: mode === "deposit" ? "#EF4444" : "#10B981" }}>
+                          {mode === "deposit"
+                            ? "✓ Se descontará del saldo de la cartera"
+                            : "✓ Se sumará al saldo de la cartera"}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Fecha *</label>
                       <input type="date" required className="input-dark" value={depositForm.date}
                         onChange={(e) => setDepositForm({ ...depositForm, date: e.target.value })} />
                     </div>
                     <div>
                       <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Nota</label>
-                      <input type="text" className="input-dark" placeholder="Ej: Aportación enero"
+                      <input type="text" className="input-dark"
+                        placeholder={mode === "deposit" ? "Ej: Aportación enero" : "Ej: Retiro para emergencia"}
                         value={depositForm.note} onChange={(e) => setDepositForm({ ...depositForm, note: e.target.value })} />
                     </div>
                   </div>
-                  <button type="submit" disabled={submitting} className="btn-primary text-sm">
-                    {submitting ? "Guardando..." : "Agregar Depósito"}
+                  <button type="submit" disabled={submitting}
+                    className="py-2.5 px-5 rounded-xl font-semibold text-white text-sm"
+                    style={{
+                      background: mode === "deposit"
+                        ? "linear-gradient(135deg, #059669, #10B981)"
+                        : "linear-gradient(135deg, #DC2626, #EF4444)"
+                    }}>
+                    {submitting ? "Guardando..." : mode === "deposit" ? "Registrar Depósito" : "Registrar Retiro"}
                   </button>
                 </form>
               </div>
 
-              {/* Deposits List */}
+              {/* Movement History */}
               <div className="glass-card rounded-2xl p-5">
                 <h3 className="text-base font-semibold text-white mb-4">
-                  Historial de Depósitos
+                  Historial de Movimientos
                   <span className="ml-2 text-sm font-normal" style={{ color: "#64748B" }}>
-                    ({selectedDeposits.length} depósitos)
+                    ({selectedDeposits.length} movimientos)
                   </span>
                 </h3>
                 {selectedDeposits.length === 0 ? (
                   <div className="text-center py-8" style={{ color: "#475569" }}>
-                    No hay depósitos. Agrega tu primer depósito arriba.
+                    Sin movimientos. Registra tu primer depósito.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr style={{ borderBottom: "1px solid rgba(16,185,129,0.1)" }}>
-                          {["Fecha", "Monto invertido", "Valor actual", "Intereses", "Nota", ""].map((h) => (
+                          {["Fecha", "Tipo", "Monto", "Valor actual", "Intereses", "Cartera", "Nota", ""].map((h) => (
                             <th key={h} className="text-left pb-3 pr-4 text-xs font-medium uppercase tracking-wider"
                               style={{ color: "#64748B" }}>{h}</th>
                           ))}
@@ -414,6 +470,7 @@ export default function AhorrosPage() {
                         {[...selectedDeposits]
                           .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
                           .map((dep) => {
+                            const isWithdrawal = dep.amount < 0
                             const monthlyRate = selectedSaving.interestRate / 100 / 12
                             const now = new Date()
                             const start = new Date(dep.date)
@@ -424,13 +481,31 @@ export default function AhorrosPage() {
                               <tr key={dep.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
                                 className="hover:bg-white/5 transition-colors">
                                 <td className="py-3 pr-4" style={{ color: "#94A3B8" }}>{formatDate(dep.date)}</td>
-                                <td className="py-3 pr-4 font-semibold text-white">{formatCurrency(dep.amount)}</td>
-                                <td className="py-3 pr-4 text-emerald-400 font-semibold">{formatCurrency(currentVal)}</td>
-                                <td className="py-3 pr-4 text-indigo-400">
-                                  +{formatCurrency(earned)}
-                                  {dep.amount > 0 && <span className="text-xs ml-1" style={{ color: "#64748B" }}>({formatPercent((earned / dep.amount) * 100)})</span>}
+                                <td className="py-3 pr-4">
+                                  <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                                    style={{
+                                      background: isWithdrawal ? "rgba(239,68,68,0.15)" : "rgba(16,185,129,0.15)",
+                                      color: isWithdrawal ? "#F87171" : "#34D399"
+                                    }}>
+                                    {isWithdrawal ? "📤 Retiro" : "📥 Depósito"}
+                                  </span>
                                 </td>
-                                <td className="py-3 pr-4" style={{ color: "#64748B" }}>{dep.note || "-"}</td>
+                                <td className={`py-3 pr-4 font-semibold ${isWithdrawal ? "text-red-400" : "text-white"}`}>
+                                  {isWithdrawal ? "-" : "+"}{formatCurrency(Math.abs(dep.amount))}
+                                </td>
+                                <td className="py-3 pr-4 text-emerald-400 font-semibold">{formatCurrency(Math.abs(currentVal))}</td>
+                                <td className="py-3 pr-4 text-indigo-400">
+                                  {!isWithdrawal && earned > 0 ? `+${formatCurrency(earned)}` : "—"}
+                                </td>
+                                <td className="py-3 pr-4">
+                                  {dep.wallet ? (
+                                    <span className="flex items-center gap-1.5 text-xs">
+                                      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dep.wallet.color }} />
+                                      <span style={{ color: "#CBD5E1" }}>{dep.wallet.name}</span>
+                                    </span>
+                                  ) : <span style={{ color: "#475569" }} className="text-xs">—</span>}
+                                </td>
+                                <td className="py-3 pr-4 text-xs" style={{ color: "#64748B" }}>{dep.note || "—"}</td>
                                 <td className="py-3">
                                   <button onClick={() => handleDeleteDeposit(selectedSaving.id, dep.id)} className="btn-danger p-1.5">
                                     <Trash2 size={13} />
@@ -442,11 +517,14 @@ export default function AhorrosPage() {
                       </tbody>
                       <tfoot>
                         <tr style={{ borderTop: "1px solid rgba(16,185,129,0.2)" }}>
-                          <td className="pt-3 text-xs font-medium" style={{ color: "#64748B" }}>TOTAL</td>
-                          <td className="pt-3 font-bold text-white">{formatCurrency(selectedPrincipal)}</td>
+                          <td className="pt-3 text-xs font-medium" style={{ color: "#64748B" }}>NETO</td>
+                          <td className="pt-3" />
+                          <td className={`pt-3 font-bold ${selectedPrincipal >= 0 ? "text-white" : "text-red-400"}`}>
+                            {formatCurrency(selectedPrincipal)}
+                          </td>
                           <td className="pt-3 font-bold text-emerald-400">{formatCurrency(selectedValue)}</td>
                           <td className="pt-3 font-bold text-indigo-400">+{formatCurrency(selectedInterest)}</td>
-                          <td colSpan={2} />
+                          <td colSpan={3} />
                         </tr>
                       </tfoot>
                     </table>

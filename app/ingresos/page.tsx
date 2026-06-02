@@ -5,7 +5,7 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis,
 } from "recharts"
-import { TrendingUp, Plus, Trash2 } from "lucide-react"
+import { TrendingUp, Plus, Trash2, Search, X } from "lucide-react"
 import { formatCurrency, formatDate, INCOME_CATEGORIES, CATEGORY_COLORS } from "@/lib/utils"
 
 interface Wallet { id: string; name: string; color: string; type: string; balance: number }
@@ -20,6 +20,7 @@ export default function IngresosPage() {
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [search, setSearch] = useState({ text: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "" })
   const [form, setForm] = useState({
     amount: "", category: INCOME_CATEGORIES[0], description: "",
     date: new Date().toISOString().split("T")[0], walletId: "",
@@ -72,6 +73,19 @@ export default function IngresosPage() {
     value: transactions.filter((t) => t.category === cat).reduce((s, t) => s + t.amount, 0),
     color: CATEGORY_COLORS[cat] || "#94A3B8",
   })).filter((c) => c.value > 0)
+
+  const filtered = transactions.filter((t) => {
+    if (search.text) {
+      const q = search.text.toLowerCase()
+      if (![t.description, t.category, t.wallet?.name, t.amount.toString()].some(v => v?.toLowerCase().includes(q))) return false
+    }
+    if (search.dateFrom && new Date(t.date) < new Date(search.dateFrom)) return false
+    if (search.dateTo && new Date(t.date) > new Date(search.dateTo + "T23:59:59")) return false
+    if (search.amountMin && t.amount < parseFloat(search.amountMin)) return false
+    if (search.amountMax && t.amount > parseFloat(search.amountMax)) return false
+    return true
+  })
+  const hasFilters = Object.values(search).some(Boolean)
 
   const monthlyData = Array.from({ length: 6 }, (_, i) => {
     const d = new Date()
@@ -217,9 +231,47 @@ export default function IngresosPage() {
 
       {/* History Table */}
       <div className="glass-card rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Historial de Ingresos</h2>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <h2 className="text-lg font-semibold text-white">
+            Historial de Ingresos
+            {hasFilters && <span className="ml-2 text-sm font-normal text-emerald-400">({filtered.length} resultado{filtered.length !== 1 ? "s" : ""})</span>}
+          </h2>
+          {hasFilters && (
+            <button onClick={() => setSearch({ text: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "" })}
+              className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg"
+              style={{ color: "#F87171", background: "rgba(239,68,68,0.1)" }}>
+              <X size={12} /> Limpiar filtros
+            </button>
+          )}
+        </div>
+
+        {/* Search bar */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5 p-4 rounded-xl" style={{ background: "rgba(6,13,31,0.5)" }}>
+          <div className="lg:col-span-2 relative">
+            <Search size={14} className="absolute left-3 top-3" style={{ color: "#64748B" }} />
+            <input className="input-dark pl-8 text-sm" placeholder="Buscar por descripción, categoría, monto..."
+              value={search.text} onChange={(e) => setSearch({ ...search, text: e.target.value })} />
+          </div>
+          <div>
+            <input type="date" className="input-dark text-sm" title="Desde"
+              value={search.dateFrom} onChange={(e) => setSearch({ ...search, dateFrom: e.target.value })} />
+          </div>
+          <div>
+            <input type="date" className="input-dark text-sm" title="Hasta"
+              value={search.dateTo} onChange={(e) => setSearch({ ...search, dateTo: e.target.value })} />
+          </div>
+          <div className="flex gap-2">
+            <input type="number" className="input-dark text-sm flex-1" placeholder="$ Mín"
+              value={search.amountMin} onChange={(e) => setSearch({ ...search, amountMin: e.target.value })} />
+            <input type="number" className="input-dark text-sm flex-1" placeholder="$ Máx"
+              value={search.amountMax} onChange={(e) => setSearch({ ...search, amountMax: e.target.value })} />
+          </div>
+        </div>
+
         {transactions.length === 0 ? (
           <div className="text-center py-10" style={{ color: "#475569" }}>No hay ingresos registrados.</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-10" style={{ color: "#475569" }}>Ningún ingreso coincide con los filtros aplicados.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -232,7 +284,7 @@ export default function IngresosPage() {
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((tx) => (
+                {filtered.map((tx) => (
                   <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
                     className="hover:bg-white/5 transition-colors">
                     <td className="py-3 pr-4" style={{ color: "#94A3B8" }}>{formatDate(tx.date)}</td>

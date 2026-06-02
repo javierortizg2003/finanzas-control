@@ -12,7 +12,7 @@ const navItems = [
   { href: "/carteras", icon: Wallet, label: "Carteras" },
   { href: "/ingresos", icon: TrendingUp, label: "Ingresos" },
   { href: "/gastos", icon: TrendingDown, label: "Gastos" },
-  { href: "/ahorros", icon: PiggyBank, label: "Ahorros" },
+  { href: "/ahorros", icon: PiggyBank, label: "Inversión" },
   { href: "/deudas", icon: CreditCard, label: "Deudas" },
   { href: "/presupuesto", icon: BarChart3, label: "Presupuesto" },
   { href: "/calculadora", icon: Calculator, label: "Calculadora" },

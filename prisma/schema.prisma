@@ -16,9 +16,10 @@ model Wallet {
   color        String        @default("#10B981")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
-  transactions Transaction[]
-  transfersOut Transfer[]    @relation("TransferFrom")
-  transfersIn  Transfer[]    @relation("TransferTo")
+  transactions   Transaction[]
+  transfersOut   Transfer[]      @relation("TransferFrom")
+  transfersIn    Transfer[]      @relation("TransferTo")
+  savingDeposits SavingDeposit[]
 }
 
 model Transfer {
@@ -61,11 +62,13 @@ model Saving {
 model SavingDeposit {
   id        String   @id @default(cuid())
   savingId  String
-  amount    Float
+  amount    Float    // positive = deposit, negative = withdrawal
   note      String?
   date      DateTime
+  walletId  String?  // source wallet for deposits, destination for withdrawals
   createdAt DateTime @default(now())
   saving    Saving   @relation(fields: [savingId], references: [id], onDelete: Cascade)
+  wallet    Wallet?  @relation(fields: [walletId], references: [id])
 }
 
 model Debt {
