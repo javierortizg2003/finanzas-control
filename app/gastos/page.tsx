@@ -8,26 +8,32 @@ import {
 import { TrendingDown, Plus, Trash2 } from "lucide-react"
 import { formatCurrency, formatDate, EXPENSE_CATEGORIES, CATEGORY_COLORS } from "@/lib/utils"
 
+interface Wallet { id: string; name: string; color: string; type: string; balance: number }
 interface Transaction {
   id: string; type: string; amount: number; category: string
   description: string | null; date: string; createdAt: string
+  wallet: { id: string; name: string; color: string; type: string } | null
 }
 
 export default function GastosPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [wallets, setWallets] = useState<Wallet[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [filterCat, setFilterCat] = useState("Todos")
   const [form, setForm] = useState({
     amount: "", category: EXPENSE_CATEGORIES[0], description: "",
-    date: new Date().toISOString().split("T")[0],
+    date: new Date().toISOString().split("T")[0], walletId: "",
   })
 
   const fetchData = () => {
-    fetch("/api/transactions?type=expense")
-      .then((r) => r.json())
-      .then(setTransactions)
-      .finally(() => setLoading(false))
+    Promise.all([
+      fetch("/api/transactions?type=expense").then((r) => r.json()),
+      fetch("/api/wallets").then((r) => r.json()),
+    ]).then(([txs, ws]) => {
+      setTransactions(txs)
+      setWallets(ws)
+    }).finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchData() }, [])
@@ -40,19 +46,17 @@ export default function GastosPage() {
       await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, type: "expense" }),
+        body: JSON.stringify({ ...form, type: "expense", walletId: form.walletId || null }),
       })
-      setForm({ amount: "", category: EXPENSE_CATEGORIES[0], description: "", date: new Date().toISOString().split("T")[0] })
+      setForm({ amount: "", category: EXPENSE_CATEGORIES[0], description: "", date: new Date().toISOString().split("T")[0], walletId: form.walletId })
       fetchData()
-    } finally {
-      setSubmitting(false)
-    }
+    } finally { setSubmitting(false) }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este gasto?")) return
     await fetch(`/api/transactions/${id}`, { method: "DELETE" })
-    setTransactions((prev) => prev.filter((t) => t.id !== id))
+    fetchData()
   }
 
   const now = new Date()
@@ -75,10 +79,7 @@ export default function GastosPage() {
     d.setMonth(d.getMonth() - (5 - i))
     const month = d.toLocaleDateString("es-MX", { month: "short" })
     const value = transactions
-      .filter((t) => {
-        const td = new Date(t.date)
-        return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear()
-      })
+      .filter((t) => { const td = new Date(t.date); return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear() })
       .reduce((s, t) => s + t.amount, 0)
     return { month, value }
   })
@@ -99,7 +100,7 @@ export default function GastosPage() {
         <h1 className="text-3xl font-bold text-white flex items-center gap-3">
           <TrendingDown style={{ color: "#EF4444" }} /> Mis Gastos
         </h1>
-        <p style={{ color: "#64748B" }} className="mt-1">Controla cada peso que sale de tu bolsillo</p>
+        <p style={{ color: "#64748B" }} className="mt-1">Registra tus gastos y vincúlalos a una cartera</p>
       </div>
 
       {/* Stats */}
@@ -127,12 +128,8 @@ export default function GastosPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Monto *</label>
-              <input
-                type="number" step="0.01" min="0" required
-                className="input-dark" placeholder="$0.00"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
-              />
+              <input type="number" step="0.01" min="0" required className="input-dark" placeholder="$0.00"
+                value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
             </div>
             <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Categoría</label>
@@ -142,17 +139,33 @@ export default function GastosPage() {
               </select>
             </div>
             <div>
+              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
+                Sale de la cuenta
+              </label>
+              <select className="input-dark" value={form.walletId}
+                onChange={(e) => setForm({ ...form, walletId: e.target.value })}>
+                <option value="">Sin asignar</option>
+                {wallets.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} — {formatCurrency(w.balance)}
+                  </option>
+                ))}
+              </select>
+              {form.walletId && (
+                <div className="mt-1 text-xs text-red-400">
+                  ✓ Se descontará del saldo de la cartera automáticamente
+                </div>
+              )}
+            </div>
+            <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Descripción</label>
               <input type="text" className="input-dark" placeholder="Ej: Supermercado"
-                value={form.description}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
+                value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
             <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Fecha</label>
               <input type="date" required className="input-dark" value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })}
-              />
+                onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </div>
             <button type="submit" disabled={submitting}
               className="w-full py-2.5 px-4 rounded-xl font-semibold text-white transition-all"
@@ -189,9 +202,7 @@ export default function GastosPage() {
               </div>
             </>
           ) : (
-            <div className="h-48 flex items-center justify-center text-sm" style={{ color: "#475569" }}>
-              Sin datos aún
-            </div>
+            <div className="h-48 flex items-center justify-center text-sm" style={{ color: "#475569" }}>Sin datos aún</div>
           )}
         </div>
 
@@ -221,15 +232,13 @@ export default function GastosPage() {
           </select>
         </div>
         {filtered.length === 0 ? (
-          <div className="text-center py-10" style={{ color: "#475569" }}>
-            No hay gastos registrados.
-          </div>
+          <div className="text-center py-10" style={{ color: "#475569" }}>No hay gastos registrados.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(239,68,68,0.1)" }}>
-                  {["Fecha", "Categoría", "Descripción", "Monto", ""].map((h) => (
+                  {["Fecha", "Categoría", "Cuenta", "Descripción", "Monto", ""].map((h) => (
                     <th key={h} className="text-left pb-3 pr-4 text-xs font-medium uppercase tracking-wider"
                       style={{ color: "#64748B" }}>{h}</th>
                   ))}
@@ -245,6 +254,16 @@ export default function GastosPage() {
                         style={{ background: `${CATEGORY_COLORS[tx.category] || "#94A3B8"}20`, color: CATEGORY_COLORS[tx.category] || "#94A3B8" }}>
                         {tx.category}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4">
+                      {tx.wallet ? (
+                        <span className="flex items-center gap-1.5 text-xs">
+                          <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ background: tx.wallet.color }} />
+                          <span style={{ color: "#CBD5E1" }}>{tx.wallet.name}</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs" style={{ color: "#475569" }}>—</span>
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-white">{tx.description || "-"}</td>
                     <td className="py-3 pr-4 font-semibold text-red-400">-{formatCurrency(tx.amount)}</td>

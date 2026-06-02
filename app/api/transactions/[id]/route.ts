@@ -6,6 +6,23 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  await prisma.transaction.delete({ where: { id } })
+
+  // Fetch first to reverse wallet balance if linked
+  const tx = await prisma.transaction.findUnique({ where: { id } })
+
+  if (tx?.walletId) {
+    // Reverse: income was +, so reverse is -; expense was -, so reverse is +
+    const balanceDelta = tx.type === "income" ? -tx.amount : tx.amount
+    await prisma.$transaction([
+      prisma.transaction.delete({ where: { id } }),
+      prisma.wallet.update({
+        where: { id: tx.walletId },
+        data: { balance: { increment: balanceDelta } },
+      }),
+    ])
+  } else {
+    await prisma.transaction.delete({ where: { id } })
+  }
+
   return NextResponse.json({ success: true })
 }
