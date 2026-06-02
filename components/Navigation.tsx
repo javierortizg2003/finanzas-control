@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, TrendingUp, TrendingDown, PiggyBank,
-  BarChart3, Calculator, Target, DollarSign, Wallet,
+  BarChart3, Calculator, Target, DollarSign, Wallet, CreditCard,
 } from "lucide-react"
 
 const navItems = [
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/ingresos", icon: TrendingUp, label: "Ingresos" },
   { href: "/gastos", icon: TrendingDown, label: "Gastos" },
   { href: "/ahorros", icon: PiggyBank, label: "Ahorros" },
+  { href: "/deudas", icon: CreditCard, label: "Deudas" },
   { href: "/presupuesto", icon: BarChart3, label: "Presupuesto" },
   { href: "/calculadora", icon: Calculator, label: "Calculadora" },
   { href: "/metas", icon: Target, label: "Metas" },
