@@ -10,8 +10,13 @@ if (!url) {
 }
 
 console.log("Running prisma db push...")
-execSync("npx prisma db push --skip-generate --accept-data-loss", {
-  env: { ...process.env, DATABASE_URL: url },
-  stdio: "inherit",
-})
-console.log("Database schema applied successfully")
+try {
+  execSync("npx prisma db push --skip-generate", {
+    env: { ...process.env, DATABASE_URL: url },
+    stdio: "inherit",
+  })
+  console.log("Database schema applied successfully")
+} catch (err) {
+  console.error("db push failed:", err.message)
+  process.exit(1)
+}
