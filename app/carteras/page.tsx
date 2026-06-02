@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Wallet, Plus, ArrowLeftRight, Trash2, Edit3, Check, X } from "lucide-react"
+import Link from "next/link"
+import { Wallet, Plus, ArrowLeftRight, Trash2, Edit3, Check, X, ChevronRight } from "lucide-react"
 import { formatCurrency, formatDate, WALLET_TYPES, getWalletType } from "@/lib/utils"
 
 interface WalletData {
@@ -353,11 +354,15 @@ export default function CarterasPage() {
                       <div className="text-xs text-red-400">Saldo adeudado</div>
                     )}
 
-                    <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                      <div className="flex justify-between text-xs" style={{ color: "#64748B" }}>
-                        <span>Ingresos: {formatCurrency(wallet.transactions.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0))}</span>
-                        <span>Gastos: {formatCurrency(wallet.transactions.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0))}</span>
+                    <div className="mt-4 pt-3 flex items-center justify-between" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div className="text-xs" style={{ color: "#64748B" }}>
+                        {wallet.transactions.length} movimiento{wallet.transactions.length !== 1 ? "s" : ""}
                       </div>
+                      <Link href={`/carteras/${wallet.id}`}
+                        className="flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg transition-all hover:opacity-90"
+                        style={{ background: `${wallet.color}15`, color: wallet.color }}>
+                        Ver detalle <ChevronRight size={12} />
+                      </Link>
                     </div>
                   </>
                 )}
