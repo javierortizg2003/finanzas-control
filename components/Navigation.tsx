@@ -75,8 +75,8 @@ export default function Navigation() {
         <ThemeToggle compact />
       </div>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex justify-around items-center py-2"
-        style={{ background: "rgba(6,13,31,0.97)", borderTop: "1px solid rgba(16,185,129,0.15)" }}>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex justify-around items-center py-3 px-2"
+        style={{ background: "rgba(6,13,31,0.97)", borderTop: "1px solid rgba(16,185,129,0.15)", paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
         {navItems.map(({ href, icon: Icon, label }) => {
           const active = href === "/carteras" ? isCarteras : pathname === href
           return (

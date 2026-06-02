@@ -24,7 +24,7 @@ export default function RootLayout({
       <body className="min-h-full" style={{ background: "#060D1F" }}>
         <Navigation />
         {/* Offset content for sidebar on desktop, bottom nav on mobile */}
-        <main className="md:ml-60 pb-20 md:pb-0 min-h-screen">
+        <main className="md:ml-60 pb-24 md:pb-0 min-h-screen">
           {children}
         </main>
       </body>
