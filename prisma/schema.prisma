@@ -7,6 +7,32 @@ datasource db {
   provider = "postgresql"
 }
 
+model Wallet {
+  id           String        @id @default(cuid())
+  name         String
+  type         String        // checking|savings|investment|cash|credit|debit
+  bank         String?
+  balance      Float         @default(0)
+  color        String        @default("#10B981")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  transactions Transaction[]
+  transfersOut Transfer[]    @relation("TransferFrom")
+  transfersIn  Transfer[]    @relation("TransferTo")
+}
+
+model Transfer {
+  id           String   @id @default(cuid())
+  fromWalletId String
+  toWalletId   String
+  amount       Float
+  description  String?
+  date         DateTime
+  createdAt    DateTime @default(now())
+  fromWallet   Wallet   @relation("TransferFrom", fields: [fromWalletId], references: [id])
+  toWallet     Wallet   @relation("TransferTo", fields: [toWalletId], references: [id])
+}
+
 model Transaction {
   id          String   @id @default(cuid())
   type        String
@@ -14,20 +40,32 @@ model Transaction {
   category    String
   description String?
   date        DateTime
+  walletId    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  wallet      Wallet?  @relation(fields: [walletId], references: [id])
 }
 
 model Saving {
-  id           String   @id @default(cuid())
+  id           String          @id @default(cuid())
   name         String
   institution  String?
-  amount       Float
   type         String
-  interestRate Float    @default(0)
-  color        String   @default("#10B981")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  interestRate Float           @default(0)
+  color        String          @default("#10B981")
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  deposits     SavingDeposit[]
+}
+
+model SavingDeposit {
+  id        String   @id @default(cuid())
+  savingId  String
+  amount    Float
+  note      String?
+  date      DateTime
+  createdAt DateTime @default(now())
+  saving    Saving   @relation(fields: [savingId], references: [id], onDelete: Cascade)
 }
 
 model Goal {

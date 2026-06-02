@@ -319,6 +319,87 @@ export const BUDGET_METHODS = {
   },
 }
 
+export const WALLET_TYPES = [
+  { value: "checking", label: "Cuenta Corriente / Nómina", icon: "🏦", color: "#10B981" },
+  { value: "savings", label: "Cuenta de Ahorro", icon: "💰", color: "#6366F1" },
+  { value: "investment", label: "Inversión / Broker", icon: "📈", color: "#F59E0B" },
+  { value: "cash", label: "Efectivo", icon: "💵", color: "#22C55E" },
+  { value: "credit", label: "Tarjeta de Crédito", icon: "💳", color: "#EF4444" },
+  { value: "debit", label: "Tarjeta de Débito", icon: "💳", color: "#8B5CF6" },
+]
+
+export function getWalletType(type: string) {
+  return WALLET_TYPES.find((w) => w.value === type) ?? WALLET_TYPES[0]
+}
+
+function monthsBetween(start: Date, end: Date): number {
+  return (
+    (end.getFullYear() - start.getFullYear()) * 12 +
+    (end.getMonth() - start.getMonth())
+  )
+}
+
+export function calculateDepositValue(
+  amount: number,
+  depositDate: string | Date,
+  annualRate: number,
+  atDate?: Date
+): number {
+  const at = atDate ?? new Date()
+  const months = Math.max(0, monthsBetween(new Date(depositDate), at))
+  const monthlyRate = annualRate / 100 / 12
+  return amount * Math.pow(1 + monthlyRate, months)
+}
+
+export function calculateSavingCurrentValue(
+  deposits: { amount: number; date: string }[],
+  annualRate: number
+): number {
+  return deposits.reduce(
+    (total, d) => total + calculateDepositValue(d.amount, d.date, annualRate),
+    0
+  )
+}
+
+export function generateSavingGrowthData(
+  deposits: { amount: number; date: string }[],
+  annualRate: number
+): { label: string; principal: number; value: number; interest: number; projected: boolean }[] {
+  if (deposits.length === 0) return []
+
+  const sorted = [...deposits].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  )
+
+  const firstDate = new Date(sorted[0].date)
+  const nowDate = new Date()
+  const endDate = new Date(nowDate.getFullYear(), nowDate.getMonth() + 13, 1)
+
+  const result = []
+  let cursor = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1)
+
+  while (cursor <= endDate) {
+    const depositsUntilNow = sorted.filter(
+      (d) => new Date(d.date) <= cursor
+    )
+    const principal = depositsUntilNow.reduce((s, d) => s + d.amount, 0)
+    const value = depositsUntilNow.reduce(
+      (s, d) => s + calculateDepositValue(d.amount, d.date, annualRate, cursor),
+      0
+    )
+    result.push({
+      label: cursor.toLocaleDateString("es-MX", { month: "short", year: "2-digit" }),
+      principal: Math.round(principal * 100) / 100,
+      value: Math.round(value * 100) / 100,
+      interest: Math.round((value - principal) * 100) / 100,
+      projected: cursor > nowDate,
+    })
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+  }
+
+  return result
+}
+
 export const FINANCIAL_TIPS = [
   "Paga primero a ti mismo: separa tu ahorro antes de gastar.",
   "Un fondo de emergencia de 6 meses te protege de imprevistos.",

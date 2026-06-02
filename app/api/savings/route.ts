@@ -3,24 +3,23 @@ import { prisma } from "@/lib/prisma"
 
 export async function GET() {
   const savings = await prisma.saving.findMany({
-    orderBy: { amount: "desc" },
+    orderBy: { createdAt: "asc" },
+    include: { deposits: { orderBy: { date: "asc" } } },
   })
   return NextResponse.json(savings)
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.json()
-
   const saving = await prisma.saving.create({
     data: {
       name: body.name,
       institution: body.institution || null,
-      amount: parseFloat(body.amount),
       type: body.type,
       interestRate: parseFloat(body.interestRate || 0),
       color: body.color || "#10B981",
     },
+    include: { deposits: true },
   })
-
   return NextResponse.json(saving, { status: 201 })
 }

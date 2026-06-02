@@ -1,84 +1,137 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
-import { PiggyBank, Plus, Trash2, Edit3, Check, X } from "lucide-react"
-import { formatCurrency, formatPercent, SAVING_TYPES, CATEGORY_COLORS } from "@/lib/utils"
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+} from "recharts"
+import { PiggyBank, Plus, Trash2, ChevronRight } from "lucide-react"
+import {
+  formatCurrency, formatDate, formatPercent, SAVING_TYPES, CATEGORY_COLORS,
+  calculateSavingCurrentValue, generateSavingGrowthData,
+} from "@/lib/utils"
+
+interface SavingDeposit {
+  id: string; savingId: string; amount: number; note: string | null; date: string
+}
 
 interface Saving {
   id: string; name: string; institution: string | null
-  amount: number; type: string; interestRate: number; color: string
+  type: string; interestRate: number; color: string
+  deposits: SavingDeposit[]
 }
 
-const COLORS = [
-  "#10B981", "#6366F1", "#F59E0B", "#EC4899", "#14B8A6",
-  "#8B5CF6", "#EF4444", "#F97316", "#22C55E", "#0EA5E9",
-]
+const COLORS = ["#10B981", "#6366F1", "#F59E0B", "#EC4899", "#14B8A6", "#8B5CF6", "#EF4444"]
+
+const GrowthTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number; color: string; name: string }[]; label?: string }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div style={{ background: "#0D1B33", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 8, padding: "10px 14px" }}>
+      <div className="text-xs font-semibold text-white mb-2">{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} className="text-xs flex gap-2 mb-0.5">
+          <span style={{ color: p.color }}>{p.name}:</span>
+          <span className="text-white font-medium">{formatCurrency(p.value)}</span>
+        </div>
+      ))}
+      {payload.length === 2 && (
+        <div className="text-xs mt-1 pt-1" style={{ borderTop: "1px solid rgba(255,255,255,0.1)", color: "#10B981" }}>
+          Intereses: {formatCurrency(payload[1].value - payload[0].value)}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function AhorrosPage() {
   const [savings, setSavings] = useState<Saving[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
-  const [form, setForm] = useState({
-    name: "", institution: "", amount: "",
-    type: SAVING_TYPES[0], interestRate: "0",
-    color: COLORS[0],
+  const [showSavingForm, setShowSavingForm] = useState(false)
+  const [depositForm, setDepositForm] = useState({
+    amount: "", note: "", date: new Date().toISOString().split("T")[0],
   })
-  const [editForm, setEditForm] = useState<typeof form | null>(null)
+  const [savingForm, setSavingForm] = useState({
+    name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0",
+  })
 
   const fetchData = () => {
     fetch("/api/savings")
       .then((r) => r.json())
-      .then(setSavings)
+      .then((data: Saving[]) => {
+        setSavings(data)
+        if (!selected && data.length > 0) setSelected(data[0].id)
+      })
       .finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchData() }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleCreateSaving = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.amount || parseFloat(form.amount) < 0) return
     setSubmitting(true)
     try {
-      await fetch("/api/savings", {
+      const res = await fetch("/api/savings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, color: COLORS[savings.length % COLORS.length] }),
+        body: JSON.stringify({ ...savingForm, color: COLORS[savings.length % COLORS.length] }),
       })
-      setForm({ name: "", institution: "", amount: "", type: SAVING_TYPES[0], interestRate: "0", color: COLORS[0] })
+      const created: Saving = await res.json()
+      setSavingForm({ name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0" })
+      setShowSavingForm(false)
       fetchData()
-    } finally {
-      setSubmitting(false)
-    }
+      setSelected(created.id)
+    } finally { setSubmitting(false) }
   }
 
-  const handleSaveEdit = async (id: string) => {
-    if (!editForm) return
-    await fetch(`/api/savings/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editForm),
-    })
-    setEditing(null)
+  const handleAddDeposit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selected || !depositForm.amount) return
+    setSubmitting(true)
+    try {
+      await fetch(`/api/savings/${selected}/deposits`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(depositForm),
+      })
+      setDepositForm({ amount: "", note: "", date: new Date().toISOString().split("T")[0] })
+      fetchData()
+    } finally { setSubmitting(false) }
+  }
+
+  const handleDeleteDeposit = async (savingId: string, depositId: string) => {
+    if (!confirm("¿Eliminar este depósito?")) return
+    await fetch(`/api/savings/${savingId}/deposits/${depositId}`, { method: "DELETE" })
     fetchData()
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar esta cuenta de ahorro?")) return
+  const handleDeleteSaving = async (id: string) => {
+    if (!confirm("¿Eliminar esta cuenta de ahorro y todos sus depósitos?")) return
     await fetch(`/api/savings/${id}`, { method: "DELETE" })
     setSavings((prev) => prev.filter((s) => s.id !== id))
+    setSelected(savings.find((s) => s.id !== id)?.id ?? null)
   }
 
-  const totalSavings = savings.reduce((s, sv) => s + sv.amount, 0)
-  const avgInterest = savings.length > 0
-    ? savings.reduce((s, sv) => s + sv.interestRate, 0) / savings.length : 0
+  const selectedSaving = savings.find((s) => s.id === selected)
+  const totalSavings = savings.reduce((sum, s) => sum + calculateSavingCurrentValue(s.deposits, s.interestRate), 0)
+  const totalPrincipal = savings.reduce((sum, s) => sum + s.deposits.reduce((d, dep) => d + dep.amount, 0), 0)
+  const totalInterest = totalSavings - totalPrincipal
 
-  // Projected value in 1 year with compound interest
-  const projectedTotal = savings.reduce((sum, sv) => {
-    const monthly = sv.interestRate / 100 / 12
-    return sum + sv.amount * Math.pow(1 + monthly, 12)
-  }, 0)
+  // Growth data for selected account
+  const growthData = selectedSaving
+    ? generateSavingGrowthData(
+        selectedSaving.deposits.map((d) => ({ amount: d.amount, date: d.date })),
+        selectedSaving.interestRate
+      )
+    : []
+
+  const selectedDeposits = selectedSaving?.deposits ?? []
+  const selectedPrincipal = selectedDeposits.reduce((s, d) => s + d.amount, 0)
+  const selectedValue = selectedSaving
+    ? calculateSavingCurrentValue(selectedDeposits, selectedSaving.interestRate)
+    : 0
+  const selectedInterest = selectedValue - selectedPrincipal
+  const nowLabel = new Date().toLocaleDateString("es-MX", { month: "short", year: "2-digit" })
 
   if (loading) {
     return (
@@ -90,224 +143,320 @@ export default function AhorrosPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <PiggyBank style={{ color: "#6366F1" }} /> Mis Ahorros
-        </h1>
-        <p style={{ color: "#64748B" }} className="mt-1">Gestiona tus cuentas y proyecta tu crecimiento</p>
+      <div className="mb-8 flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+            <PiggyBank style={{ color: "#6366F1" }} /> Mis Ahorros
+          </h1>
+          <p style={{ color: "#64748B" }} className="mt-1">Registra depósitos y visualiza el crecimiento con intereses</p>
+        </div>
+        <button onClick={() => setShowSavingForm(!showSavingForm)} className="btn-primary flex items-center gap-2 text-sm">
+          <Plus size={16} /> Nueva Cuenta
+        </button>
       </div>
 
-      {/* Stats */}
+      {/* Global Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Total ahorrado</div>
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Valor total</div>
           <div className="text-2xl font-bold text-white">{formatCurrency(totalSavings)}</div>
+          <div className="text-xs mt-1 text-emerald-400">Con intereses</div>
+        </div>
+        <div className="stat-card p-5">
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Capital invertido</div>
+          <div className="text-2xl font-bold text-white">{formatCurrency(totalPrincipal)}</div>
+          <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Depósitos reales</div>
+        </div>
+        <div className="stat-card p-5">
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Intereses ganados</div>
+          <div className="text-2xl font-bold text-indigo-400">{formatCurrency(totalInterest)}</div>
+          <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Dinero extra</div>
         </div>
         <div className="stat-card p-5">
           <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Cuentas activas</div>
           <div className="text-2xl font-bold text-white">{savings.length}</div>
-        </div>
-        <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Interés promedio</div>
-          <div className="text-2xl font-bold text-emerald-400">{formatPercent(avgInterest)}</div>
-        </div>
-        <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Proyección 1 año</div>
-          <div className="text-2xl font-bold text-indigo-400">{formatCurrency(projectedTotal)}</div>
-          <div className="text-xs mt-1" style={{ color: "#10B981" }}>
-            +{formatCurrency(projectedTotal - totalSavings)}
+          <div className="text-xs mt-1 text-emerald-400">
+            {totalPrincipal > 0 ? `+${formatPercent((totalInterest / totalPrincipal) * 100)} rendimiento` : ""}
           </div>
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-6 mb-8">
-        {/* Form */}
-        <div className="glass-card rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-5 flex items-center gap-2">
-            <Plus size={18} style={{ color: "#6366F1" }} /> Agregar Cuenta
-          </h2>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Nombre *</label>
-              <input type="text" required className="input-dark" placeholder="Ej: CETES Directo"
-                value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+      {/* New Saving Form */}
+      {showSavingForm && (
+        <div className="glass-card rounded-2xl p-6 mb-6 fade-in">
+          <h2 className="text-lg font-semibold text-white mb-4">Agregar Cuenta de Ahorro</h2>
+          <form onSubmit={handleCreateSaving}>
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Nombre *</label>
+                <input type="text" required className="input-dark" placeholder="Ej: CETES 2025"
+                  value={savingForm.name} onChange={(e) => setSavingForm({ ...savingForm, name: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Institución</label>
+                <input type="text" className="input-dark" placeholder="Ej: Fintual, XTB..."
+                  value={savingForm.institution} onChange={(e) => setSavingForm({ ...savingForm, institution: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tipo</label>
+                <select className="input-dark" value={savingForm.type} onChange={(e) => setSavingForm({ ...savingForm, type: e.target.value })}>
+                  {SAVING_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tasa interés anual (%)</label>
+                <input type="number" step="0.01" min="0" max="100" className="input-dark" placeholder="0.00"
+                  value={savingForm.interestRate} onChange={(e) => setSavingForm({ ...savingForm, interestRate: e.target.value })} />
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Institución</label>
-              <input type="text" className="input-dark" placeholder="Ej: BBVA, Fintual..."
-                value={form.institution} onChange={(e) => setForm({ ...form, institution: e.target.value })} />
+            <div className="flex gap-3">
+              <button type="submit" disabled={submitting}
+                className="py-2.5 px-6 rounded-xl font-semibold text-white"
+                style={{ background: "linear-gradient(135deg, #4F46E5, #6366F1)" }}>
+                {submitting ? "Creando..." : "Crear Cuenta"}
+              </button>
+              <button type="button" onClick={() => setShowSavingForm(false)}
+                className="py-2.5 px-6 rounded-xl font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#94A3B8" }}>
+                Cancelar
+              </button>
             </div>
-            <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Saldo actual *</label>
-              <input type="number" step="0.01" min="0" required className="input-dark" placeholder="$0.00"
-                value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tipo</label>
-              <select className="input-dark" value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                {SAVING_TYPES.map((t) => <option key={t}>{t}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
-                Tasa de interés anual (%)
-              </label>
-              <input type="number" step="0.01" min="0" max="100" className="input-dark" placeholder="0.00"
-                value={form.interestRate} onChange={(e) => setForm({ ...form, interestRate: e.target.value })} />
-            </div>
-            <button type="submit" disabled={submitting}
-              className="w-full py-2.5 px-4 rounded-xl font-semibold text-white transition-all"
-              style={{ background: "linear-gradient(135deg, #4F46E5, #6366F1)" }}>
-              {submitting ? "Guardando..." : "Agregar Cuenta"}
-            </button>
           </form>
         </div>
+      )}
 
-        {/* Pie Chart */}
-        <div className="glass-card rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Distribución</h2>
-          {savings.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={savings} cx="50%" cy="50%" innerRadius={55} outerRadius={80}
-                    paddingAngle={3} dataKey="amount" nameKey="name">
-                    {savings.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="text-center mt-2 mb-4">
-                <div className="text-2xl font-bold text-white">{formatCurrency(totalSavings)}</div>
-                <div className="text-xs" style={{ color: "#64748B" }}>Total</div>
-              </div>
-              <div className="space-y-2">
-                {savings.map((sv, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full" style={{ background: sv.color }} />
-                      <span style={{ color: "#94A3B8" }} className="truncate max-w-28">{sv.name}</span>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-white font-medium">{formatCurrency(sv.amount)}</div>
-                      <div style={{ color: "#64748B" }}>{((sv.amount / totalSavings) * 100).toFixed(0)}%</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="h-48 flex items-center justify-center text-sm" style={{ color: "#475569" }}>
-              Agrega tu primera cuenta de ahorro
-            </div>
-          )}
+      {savings.length === 0 ? (
+        <div className="text-center py-20">
+          <div className="text-6xl mb-4">💰</div>
+          <div className="text-xl font-semibold text-white mb-2">Sin cuentas de ahorro</div>
+          <p style={{ color: "#64748B" }} className="mb-6">Crea tu primera cuenta para empezar a rastrear tus depósitos e intereses</p>
+          <button onClick={() => setShowSavingForm(true)} className="btn-primary">Crear cuenta de ahorro</button>
         </div>
-
-        {/* Interest Projection */}
-        <div className="glass-card rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Proyección de Intereses</h2>
-          <div className="space-y-3">
-            {[1, 3, 5, 10].map((years) => {
-              const projected = savings.reduce((sum, sv) => {
-                const monthly = sv.interestRate / 100 / 12
-                return sum + sv.amount * Math.pow(1 + monthly, years * 12)
-              }, 0)
-              const gained = projected - totalSavings
+      ) : (
+        <div className="grid lg:grid-cols-4 gap-6">
+          {/* Left: Account List */}
+          <div className="lg:col-span-1 space-y-2">
+            <div className="text-xs font-medium uppercase tracking-wider mb-3" style={{ color: "#64748B" }}>Cuentas</div>
+            {savings.map((s) => {
+              const value = calculateSavingCurrentValue(s.deposits, s.interestRate)
+              const principal = s.deposits.reduce((sum, d) => sum + d.amount, 0)
+              const interest = value - principal
+              const isSelected = selected === s.id
               return (
-                <div key={years} className="p-4 rounded-xl" style={{ background: "rgba(6,13,31,0.5)", border: "1px solid rgba(99,102,241,0.15)" }}>
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-sm font-semibold text-white">{years} {years === 1 ? "año" : "años"}</div>
-                      <div className="text-xs mt-0.5" style={{ color: "#64748B" }}>Con interés compuesto</div>
+                <button key={s.id} onClick={() => setSelected(s.id)}
+                  className="w-full text-left p-4 rounded-xl transition-all"
+                  style={{
+                    background: isSelected ? `${s.color}15` : "rgba(6,13,31,0.5)",
+                    border: `1px solid ${isSelected ? s.color + "40" : "rgba(255,255,255,0.06)"}`,
+                  }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-3 h-3 rounded-full" style={{ background: s.color }} />
+                      <div>
+                        <div className="text-sm font-medium text-white truncate max-w-32">{s.name}</div>
+                        {s.institution && <div className="text-xs" style={{ color: "#64748B" }}>{s.institution}</div>}
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold text-white">{formatCurrency(projected)}</div>
-                      <div className="text-xs text-emerald-400">+{formatCurrency(gained)}</div>
-                    </div>
+                    <ChevronRight size={14} style={{ color: isSelected ? s.color : "#475569" }} />
                   </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                    <div className="h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, (gained / Math.max(1, totalSavings)) * 100 * 5)}%`,
-                        background: "linear-gradient(90deg, #4F46E5, #6366F1)",
-                      }}
-                    />
+                  <div className="mt-2">
+                    <div className="text-base font-bold text-white">{formatCurrency(value)}</div>
+                    {interest > 0 && <div className="text-xs text-emerald-400">+{formatCurrency(interest)} intereses</div>}
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
-        </div>
-      </div>
 
-      {/* Savings List */}
-      <div className="glass-card rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Mis Cuentas</h2>
-        {savings.length === 0 ? (
-          <div className="text-center py-10" style={{ color: "#475569" }}>
-            No tienes cuentas de ahorro registradas.
-          </div>
-        ) : (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {savings.map((sv) => (
-              <div key={sv.id} className="p-4 rounded-xl" style={{ background: "rgba(6,13,31,0.5)", border: `1px solid ${sv.color}25` }}>
-                {editing === sv.id && editForm ? (
-                  <div className="space-y-2">
-                    <input className="input-dark text-sm" value={editForm.name}
-                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-                    <input type="number" className="input-dark text-sm" value={editForm.amount}
-                      onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} />
-                    <input type="number" className="input-dark text-sm" placeholder="Tasa de interés %"
-                      value={editForm.interestRate}
-                      onChange={(e) => setEditForm({ ...editForm, interestRate: e.target.value })} />
-                    <div className="flex gap-2">
-                      <button onClick={() => handleSaveEdit(sv.id)}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1"
-                        style={{ background: "rgba(16,185,129,0.2)", color: "#10B981" }}>
-                        <Check size={12} /> Guardar
-                      </button>
-                      <button onClick={() => setEditing(null)}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-medium flex items-center justify-center gap-1"
-                        style={{ background: "rgba(239,68,68,0.15)", color: "#F87171" }}>
-                        <X size={12} /> Cancelar
-                      </button>
+          {/* Right: Selected Account Detail */}
+          {selectedSaving && (
+            <div className="lg:col-span-3 space-y-5">
+              {/* Header */}
+              <div className="glass-card rounded-2xl p-5">
+                <div className="flex items-start justify-between flex-wrap gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="w-3 h-3 rounded-full" style={{ background: selectedSaving.color }} />
+                      <h2 className="text-xl font-bold text-white">{selectedSaving.name}</h2>
+                      {selectedSaving.institution && (
+                        <span className="text-sm" style={{ color: "#64748B" }}>· {selectedSaving.institution}</span>
+                      )}
+                    </div>
+                    <div className="text-xs" style={{ color: "#64748B" }}>
+                      {selectedSaving.type} · {formatPercent(selectedSaving.interestRate)} anual
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <div className="font-semibold text-white">{sv.name}</div>
-                        {sv.institution && <div className="text-xs mt-0.5" style={{ color: "#64748B" }}>{sv.institution}</div>}
+                  <button onClick={() => handleDeleteSaving(selectedSaving.id)} className="btn-danger p-1.5">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mt-4">
+                  <div>
+                    <div className="text-xs mb-1" style={{ color: "#64748B" }}>Capital invertido</div>
+                    <div className="text-xl font-bold text-white">{formatCurrency(selectedPrincipal)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs mb-1" style={{ color: "#64748B" }}>Valor actual</div>
+                    <div className="text-xl font-bold text-emerald-400">{formatCurrency(selectedValue)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs mb-1" style={{ color: "#64748B" }}>Intereses</div>
+                    <div className="text-xl font-bold text-indigo-400">{formatCurrency(selectedInterest)}</div>
+                    {selectedPrincipal > 0 && (
+                      <div className="text-xs text-emerald-400">
+                        +{formatPercent((selectedInterest / selectedPrincipal) * 100)}
                       </div>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={{ background: `${sv.color}20`, color: sv.color }}>
-                        {sv.type}
-                      </span>
-                    </div>
-                    <div className="text-2xl font-bold text-white mb-1">{formatCurrency(sv.amount)}</div>
-                    {sv.interestRate > 0 && (
-                      <div className="text-xs text-emerald-400">{formatPercent(sv.interestRate)} anual</div>
                     )}
-                    <div className="flex gap-2 mt-3">
-                      <button onClick={() => {
-                        setEditing(sv.id)
-                        setEditForm({ name: sv.name, institution: sv.institution || "", amount: String(sv.amount), type: sv.type, interestRate: String(sv.interestRate), color: sv.color })
-                      }} className="p-1.5 rounded-lg transition-colors" style={{ color: "#6366F1", background: "rgba(99,102,241,0.1)" }}>
-                        <Edit3 size={14} />
-                      </button>
-                      <button onClick={() => handleDelete(sv.id)} className="btn-danger p-1.5">
-                        <Trash2 size={14} />
-                      </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Growth Chart */}
+              {growthData.length > 1 && (
+                <div className="glass-card rounded-2xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-white">Crecimiento de la cuenta</h3>
+                      <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
+                        Histórico + proyección 12 meses · Zona sombreada = intereses ganados
+                      </p>
                     </div>
-                  </>
+                  </div>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={growthData} margin={{ top: 5, right: 5, bottom: 0, left: 5 }}>
+                      <defs>
+                        <linearGradient id="principalGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6366F1" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#6366F1" stopOpacity={0.05} />
+                        </linearGradient>
+                        <linearGradient id="valueGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#10B981" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#10B981" stopOpacity={0.05} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="label" tick={{ fill: "#64748B", fontSize: 10 }} axisLine={false} tickLine={false}
+                        interval={Math.floor(growthData.length / 6)} />
+                      <YAxis tick={{ fill: "#64748B", fontSize: 10 }} axisLine={false} tickLine={false}
+                        tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} width={45} />
+                      <Tooltip content={<GrowthTooltip />} />
+                      <ReferenceLine x={nowLabel} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4"
+                        label={{ value: "Hoy", position: "top", fill: "#94A3B8", fontSize: 10 }} />
+                      <Area type="monotone" dataKey="principal" name="Capital aportado"
+                        stroke="#6366F1" fill="url(#principalGrad)" strokeWidth={2} />
+                      <Area type="monotone" dataKey="value" name="Valor con intereses"
+                        stroke="#10B981" fill="url(#valueGrad)" strokeWidth={2} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                  <div className="flex gap-5 mt-2">
+                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "#94A3B8" }}>
+                      <div className="w-3 h-1.5 rounded" style={{ background: "#6366F1" }} /> Capital aportado
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs" style={{ color: "#94A3B8" }}>
+                      <div className="w-3 h-1.5 rounded" style={{ background: "#10B981" }} /> Valor con intereses
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add Deposit */}
+              <div className="glass-card rounded-2xl p-5">
+                <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
+                  <Plus size={16} style={{ color: "#10B981" }} /> Registrar Depósito
+                </h3>
+                <form onSubmit={handleAddDeposit}>
+                  <div className="grid md:grid-cols-3 gap-4 mb-4">
+                    <div>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Monto *</label>
+                      <input type="number" step="0.01" min="0" required className="input-dark" placeholder="$0.00"
+                        value={depositForm.amount} onChange={(e) => setDepositForm({ ...depositForm, amount: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Fecha del depósito *</label>
+                      <input type="date" required className="input-dark" value={depositForm.date}
+                        onChange={(e) => setDepositForm({ ...depositForm, date: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Nota</label>
+                      <input type="text" className="input-dark" placeholder="Ej: Aportación enero"
+                        value={depositForm.note} onChange={(e) => setDepositForm({ ...depositForm, note: e.target.value })} />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={submitting} className="btn-primary text-sm">
+                    {submitting ? "Guardando..." : "Agregar Depósito"}
+                  </button>
+                </form>
+              </div>
+
+              {/* Deposits List */}
+              <div className="glass-card rounded-2xl p-5">
+                <h3 className="text-base font-semibold text-white mb-4">
+                  Historial de Depósitos
+                  <span className="ml-2 text-sm font-normal" style={{ color: "#64748B" }}>
+                    ({selectedDeposits.length} depósitos)
+                  </span>
+                </h3>
+                {selectedDeposits.length === 0 ? (
+                  <div className="text-center py-8" style={{ color: "#475569" }}>
+                    No hay depósitos. Agrega tu primer depósito arriba.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid rgba(16,185,129,0.1)" }}>
+                          {["Fecha", "Monto invertido", "Valor actual", "Intereses", "Nota", ""].map((h) => (
+                            <th key={h} className="text-left pb-3 pr-4 text-xs font-medium uppercase tracking-wider"
+                              style={{ color: "#64748B" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...selectedDeposits]
+                          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                          .map((dep) => {
+                            const monthlyRate = selectedSaving.interestRate / 100 / 12
+                            const now = new Date()
+                            const start = new Date(dep.date)
+                            const months = Math.max(0, (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth()))
+                            const currentVal = dep.amount * Math.pow(1 + monthlyRate, months)
+                            const earned = currentVal - dep.amount
+                            return (
+                              <tr key={dep.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                                className="hover:bg-white/5 transition-colors">
+                                <td className="py-3 pr-4" style={{ color: "#94A3B8" }}>{formatDate(dep.date)}</td>
+                                <td className="py-3 pr-4 font-semibold text-white">{formatCurrency(dep.amount)}</td>
+                                <td className="py-3 pr-4 text-emerald-400 font-semibold">{formatCurrency(currentVal)}</td>
+                                <td className="py-3 pr-4 text-indigo-400">
+                                  +{formatCurrency(earned)}
+                                  {dep.amount > 0 && <span className="text-xs ml-1" style={{ color: "#64748B" }}>({formatPercent((earned / dep.amount) * 100)})</span>}
+                                </td>
+                                <td className="py-3 pr-4" style={{ color: "#64748B" }}>{dep.note || "-"}</td>
+                                <td className="py-3">
+                                  <button onClick={() => handleDeleteDeposit(selectedSaving.id, dep.id)} className="btn-danger p-1.5">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ borderTop: "1px solid rgba(16,185,129,0.2)" }}>
+                          <td className="pt-3 text-xs font-medium" style={{ color: "#64748B" }}>TOTAL</td>
+                          <td className="pt-3 font-bold text-white">{formatCurrency(selectedPrincipal)}</td>
+                          <td className="pt-3 font-bold text-emerald-400">{formatCurrency(selectedValue)}</td>
+                          <td className="pt-3 font-bold text-indigo-400">+{formatCurrency(selectedInterest)}</td>
+                          <td colSpan={2} />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 )}
               </div>
-            ))}
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
