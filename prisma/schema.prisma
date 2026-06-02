@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String
+  amount      Float
+  category    String
+  description String?
+  date        DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Saving {
+  id           String   @id @default(cuid())
+  name         String
+  institution  String?
+  amount       Float
+  type         String
+  interestRate Float    @default(0)
+  color        String   @default("#10B981")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Goal {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  deadline      DateTime?
+  category      String?
+  color         String    @default("#10B981")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
