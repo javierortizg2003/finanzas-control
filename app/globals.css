@@ -12,15 +12,46 @@
   --color-danger: #EF4444;
 }
 
+:root {
+  --bg-primary: #060D1F;
+  --bg-secondary: #0D1B33;
+  --bg-tertiary: #0F2040;
+  --bg-hover: rgba(6, 13, 31, 0.5);
+  --bg-glass: rgba(15, 32, 64, 0.8);
+  --bg-input: rgba(6, 13, 31, 0.8);
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --border-color: rgba(16, 185, 129, 0.12);
+  --scroll-track: #0D1B33;
+  --scroll-thumb: #1E3A5F;
+}
+
+html.light {
+  --bg-primary: #F0F4F8;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F8FAFC;
+  --bg-hover: rgba(0, 0, 0, 0.03);
+  --bg-glass: rgba(255, 255, 255, 0.95);
+  --bg-input: #F8FAFC;
+  --text-primary: #1E293B;
+  --text-secondary: #64748B;
+  --text-muted: #94A3B8;
+  --border-color: #E2E8F0;
+  --scroll-track: #E2E8F0;
+  --scroll-thumb: #94A3B8;
+}
+
 html {
   scroll-behavior: smooth;
 }
 
 body {
-  background-color: #060D1F;
-  color: #F8FAFC;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   font-family: system-ui, -apple-system, sans-serif;
   min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 * {
@@ -33,11 +64,11 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0D1B33;
+  background: var(--scroll-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1E3A5F;
+  background: var(--scroll-thumb);
   border-radius: 3px;
 }
 
@@ -46,9 +77,10 @@ body {
 }
 
 .glass-card {
-  background: rgba(15, 32, 64, 0.8);
+  background: var(--bg-glass);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(16, 185, 129, 0.12);
+  border: 1px solid var(--border-color);
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .gradient-text {
@@ -67,6 +99,11 @@ body {
   border: 1px solid rgba(16, 185, 129, 0.1);
   border-radius: 16px;
   transition: all 0.2s ease;
+}
+
+html.light .stat-card {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
 }
 
 .stat-card:hover {
@@ -106,13 +143,13 @@ body {
 }
 
 .input-dark {
-  background: rgba(6, 13, 31, 0.8);
+  background: var(--bg-input);
   border: 1px solid rgba(16, 185, 129, 0.2);
   border-radius: 10px;
-  color: #F8FAFC;
+  color: var(--text-primary);
   padding: 10px 14px;
   width: 100%;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, background 0.2s ease, color 0.2s ease;
 }
 
 .input-dark:focus {
@@ -121,18 +158,18 @@ body {
 }
 
 .input-dark::placeholder {
-  color: #64748B;
+  color: var(--text-muted);
 }
 
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background: #0D1B33 !important;
+  background: var(--bg-secondary) !important;
   border: 1px solid rgba(16, 185, 129, 0.2) !important;
   border-radius: 8px !important;
 }
 
 select.input-dark option {
-  background: #0D1B33;
-  color: #F8FAFC;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 @keyframes fadeIn {
@@ -149,80 +186,38 @@ select.input-dark option {
   50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
 }
 
-/* ── Light Mode ────────────────────────────────────── */
-html.light body {
-  background-color: #F0F4F8;
-  color: #1E293B;
-}
-
-html.light aside {
-  background: rgba(240, 244, 248, 0.97) !important;
-  border-right-color: rgba(16, 185, 129, 0.15) !important;
-}
-
+/* ── Light Mode Additional Overrides ────────────────────────────────────── */
+html.light aside,
 html.light nav.fixed.bottom-0 {
-  background: rgba(240, 244, 248, 0.97) !important;
-  border-top-color: rgba(16, 185, 129, 0.15) !important;
+  background: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
 }
 
 html.light .glass-card {
-  background: rgba(255, 255, 255, 0.95) !important;
-  border-color: #E2E8F0 !important;
+  background: var(--bg-glass) !important;
+  border-color: var(--border-color) !important;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06) !important;
-}
-
-html.light .stat-card {
-  background: #FFFFFF !important;
-  border-color: #E2E8F0 !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
-}
-
-html.light .input-dark {
-  background: #F8FAFC !important;
-  border-color: #CBD5E1 !important;
-  color: #1E293B !important;
-}
-
-html.light .input-dark::placeholder {
-  color: #94A3B8 !important;
-}
-
-html.light select.input-dark option {
-  background: #F8FAFC;
-  color: #1E293B;
 }
 
 html.light .btn-danger {
   background: rgba(239, 68, 68, 0.08) !important;
   border-color: rgba(239, 68, 68, 0.2) !important;
+  color: #EF4444 !important;
 }
 
 html.light .hover\:bg-white\/5:hover {
-  background: rgba(0, 0, 0, 0.03) !important;
+  background: var(--bg-hover) !important;
 }
 
 html.light .bg-slate-800 {
-  background-color: #E2E8F0 !important;
+  background-color: var(--bg-tertiary) !important;
 }
 
-html.light ::-webkit-scrollbar-track {
-  background: #E2E8F0;
-}
-
-html.light ::-webkit-scrollbar-thumb {
-  background: #94A3B8;
-}
-
-/* Key text overrides for light mode */
 html.light .text-white {
-  color: #1E293B !important;
+  color: var(--text-primary) !important;
 }
 
 html.light .text-slate-100,
 html.light .text-slate-200 {
-  color: #334155 !important;
-}
-
-html.light .fade-in {
-  animation: fadeIn 0.3s ease forwards;
+  color: var(--text-secondary) !important;
 }

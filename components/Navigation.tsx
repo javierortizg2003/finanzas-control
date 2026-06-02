@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, TrendingUp, TrendingDown, PiggyBank,
-  BarChart3, Calculator, Target, DollarSign, Wallet, CreditCard,
+  BarChart3, Calculator, Target, DollarSign, Wallet, CreditCard, Settings,
 } from "lucide-react"
 import ThemeToggle from "./ThemeToggle"
 
@@ -18,6 +18,7 @@ const navItems = [
   { href: "/presupuesto", icon: BarChart3, label: "Presupuesto" },
   { href: "/calculadora", icon: Calculator, label: "Calculadora" },
   { href: "/metas", icon: Target, label: "Metas" },
+  { href: "/configuracion", icon: Settings, label: "Configuración" },
 ]
 
 export default function Navigation() {
