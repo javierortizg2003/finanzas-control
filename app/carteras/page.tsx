@@ -10,6 +10,7 @@ interface WalletData {
   name: string
   type: string
   bank: string | null
+  currency: string
   balance: number
   color: string
   createdAt: string
@@ -42,7 +43,7 @@ export default function CarterasPage() {
   const [submitting, setSubmitting] = useState(false)
   const [form, setForm] = useState({
     name: "", type: "checking", bank: "", balance: "0",
-    color: WALLET_COLORS[0],
+    currency: "MXN", color: WALLET_COLORS[0],
   })
   const [editForm, setEditForm] = useState<typeof form | null>(null)
   const [transferForm, setTransferForm] = useState({
@@ -71,7 +72,7 @@ export default function CarterasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...form, color: WALLET_COLORS[wallets.length % WALLET_COLORS.length] }),
       })
-      setForm({ name: "", type: "checking", bank: "", balance: "0", color: WALLET_COLORS[0] })
+      setForm({ name: "", type: "checking", bank: "", balance: "0", currency: "MXN", color: WALLET_COLORS[0] })
       setShowForm(false)
       fetchData()
     } finally { setSubmitting(false) }
@@ -92,6 +93,46 @@ export default function CarterasPage() {
     if (!confirm("¿Eliminar esta cartera? Los datos de transferencias ligadas también se eliminarán.")) return
     await fetch(`/api/wallets/${id}`, { method: "DELETE" })
     setWallets((prev) => prev.filter((w) => w.id !== id))
+  }
+
+  const handleConversion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+    const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+
+    if (!fromWallet || !toWallet) return
+    if (fromWallet.currency === toWallet.currency) {
+      alert("Las carteras tienen la misma moneda. Usa la transferencia normal.")
+      return
+    }
+
+    const amountFrom = parseFloat(transferForm.amount)
+    const exchangeRate = prompt(`Tasa de cambio 1 ${fromWallet.currency} = X ${toWallet.currency}`)
+    if (!exchangeRate) return
+
+    const amountTo = amountFrom * parseFloat(exchangeRate)
+    setSubmitting(true)
+    try {
+      await fetch("/api/conversions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromWalletId: transferForm.fromWalletId,
+          toWalletId: transferForm.toWalletId,
+          amountFrom,
+          amountTo,
+          exchangeRate: parseFloat(exchangeRate),
+          description: transferForm.description,
+          date: transferForm.date,
+        }),
+      })
+      setTransferForm({
+        fromWalletId: "", toWalletId: "", amount: "",
+        description: "", date: new Date().toISOString().split("T")[0],
+      })
+      setShowTransfer(false)
+      fetchData()
+    } finally { setSubmitting(false) }
   }
 
   const handleTransfer = async (e: React.FormEvent) => {
@@ -175,10 +216,26 @@ export default function CarterasPage() {
       {/* Transfer Form */}
       {showTransfer && (
         <div className="glass-card rounded-2xl p-6 mb-6 fade-in">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <ArrowLeftRight size={18} style={{ color: "#6366F1" }} /> Nueva Transferencia
-          </h2>
-          <form onSubmit={handleTransfer}>
+          {(() => {
+            const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+            const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+            const isDifferentCurrency = fromWallet && toWallet && fromWallet.currency !== toWallet.currency
+            return (
+              <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                <ArrowLeftRight size={18} style={{ color: isDifferentCurrency ? "#F59E0B" : "#6366F1" }} />
+                {isDifferentCurrency ? "Conversión de Moneda" : "Nueva Transferencia"}
+              </h2>
+            )
+          })()}
+          <form onSubmit={(e) => {
+            const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+            const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+            if (fromWallet && toWallet && fromWallet.currency !== toWallet.currency) {
+              handleConversion(e)
+            } else {
+              handleTransfer(e)
+            }
+          }}>
             <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
               <div className="lg:col-span-2">
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Cuenta origen</label>
@@ -204,6 +261,21 @@ export default function CarterasPage() {
                 </select>
               </div>
             </div>
+            {(() => {
+              const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+              const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+              const isDifferent = fromWallet && toWallet && fromWallet.currency !== toWallet.currency
+              return isDifferent ? (
+                <div className="mb-4 p-3 rounded-lg" style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.2)" }}>
+                  <div className="text-xs font-semibold mb-1" style={{ color: "#F59E0B" }}>
+                    💱 Conversión manual: {fromWallet.currency} → {toWallet.currency}
+                  </div>
+                  <div className="text-xs" style={{ color: "#94A3B8" }}>
+                    Ingresa el monto en {fromWallet.currency} y se te pedirá la tasa de cambio. Luego se deducirá de {fromWallet.name} y se acreditará en {toWallet.name}.
+                  </div>
+                </div>
+              ) : null
+            })()}
             <div className="grid md:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Monto *</label>
@@ -224,8 +296,21 @@ export default function CarterasPage() {
             <div className="flex gap-3">
               <button type="submit" disabled={submitting}
                 className="py-2.5 px-6 rounded-xl font-semibold text-white"
-                style={{ background: "linear-gradient(135deg, #4F46E5, #6366F1)" }}>
-                {submitting ? "Transfiriendo..." : "Realizar Transferencia"}
+                style={{
+                  background: (() => {
+                    const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+                    const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+                    const isDifferent = fromWallet && toWallet && fromWallet.currency !== toWallet.currency
+                    return isDifferent ? "linear-gradient(135deg, #F59E0B, #FBBF24)" : "linear-gradient(135deg, #4F46E5, #6366F1)"
+                  })()
+                }}>
+                {(() => {
+                  const fromWallet = wallets.find((w) => w.id === transferForm.fromWalletId)
+                  const toWallet = wallets.find((w) => w.id === transferForm.toWalletId)
+                  const isDifferent = fromWallet && toWallet && fromWallet.currency !== toWallet.currency
+                  if (submitting) return isDifferent ? "Convirtiendo..." : "Transfiriendo..."
+                  return isDifferent ? "Realizar Conversión" : "Realizar Transferencia"
+                })()}
               </button>
               <button type="button" onClick={() => setShowTransfer(false)}
                 className="py-2.5 px-6 rounded-xl font-medium" style={{ background: "rgba(255,255,255,0.06)", color: "#94A3B8" }}>
@@ -259,6 +344,19 @@ export default function CarterasPage() {
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Banco / Institución</label>
                 <input type="text" className="input-dark" placeholder="Ej: BBVA, XTB, Santander"
                   value={form.bank} onChange={(e) => setForm({ ...form, bank: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Moneda</label>
+                <select className="input-dark" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+                  <option value="MXN">🇲🇽 Peso Mexicano (MXN)</option>
+                  <option value="USD">🇺🇸 Dólar Estadounidense (USD)</option>
+                  <option value="EUR">🇪🇺 Euro (EUR)</option>
+                  <option value="COP">🇨🇴 Peso Colombiano (COP)</option>
+                  <option value="ARS">🇦🇷 Peso Argentino (ARS)</option>
+                  <option value="CLP">🇨🇱 Peso Chileno (CLP)</option>
+                  <option value="BTC">₿ Bitcoin (BTC)</option>
+                  <option value="ETH">Ξ Ethereum (ETH)</option>
+                </select>
               </div>
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Saldo actual</label>
@@ -330,14 +428,14 @@ export default function CarterasPage() {
                         <div>
                           <div className="font-semibold text-white leading-tight">{wallet.name}</div>
                           <div className="text-xs mt-0.5" style={{ color: "#64748B" }}>
-                            {wallet.bank && `${wallet.bank} · `}{wt.label}
+                            {wallet.bank && `${wallet.bank} · `}{wt.label} · <span style={{ color: wallet.color }}>{wallet.currency}</span>
                           </div>
                         </div>
                       </div>
                       <div className="flex gap-1.5">
                         <button onClick={() => {
                           setEditing(wallet.id)
-                          setEditForm({ name: wallet.name, type: wallet.type, bank: wallet.bank || "", balance: String(wallet.balance), color: wallet.color })
+                          setEditForm({ name: wallet.name, type: wallet.type, bank: wallet.bank || "", balance: String(wallet.balance), currency: wallet.currency, color: wallet.color })
                         }} className="p-1.5 rounded-lg" style={{ color: "#6366F1", background: "rgba(99,102,241,0.1)" }}>
                           <Edit3 size={13} />
                         </button>

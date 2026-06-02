@@ -12,6 +12,7 @@ model Wallet {
   name         String
   type         String        // checking|savings|investment|cash|credit|debit
   bank         String?
+  currency     String        @default("MXN") // MXN|USD|EUR|BTC|etc
   balance      Float         @default(0)
   color        String        @default("#10B981")
   createdAt    DateTime      @default(now())
@@ -20,6 +21,8 @@ model Wallet {
   transfersOut   Transfer[]      @relation("TransferFrom")
   transfersIn    Transfer[]      @relation("TransferTo")
   savingDeposits SavingDeposit[]
+  conversionsOut CurrencyConversion[] @relation("ConvertFrom")
+  conversionsIn  CurrencyConversion[] @relation("ConvertTo")
 }
 
 model Transfer {
@@ -32,6 +35,20 @@ model Transfer {
   createdAt    DateTime @default(now())
   fromWallet   Wallet   @relation("TransferFrom", fields: [fromWalletId], references: [id])
   toWallet     Wallet   @relation("TransferTo", fields: [toWalletId], references: [id])
+}
+
+model CurrencyConversion {
+  id              String   @id @default(cuid())
+  fromWalletId    String
+  toWalletId      String
+  amountFrom      Float    // cantidad que sale
+  amountTo        Float    // cantidad que entra
+  exchangeRate    Float    // tasa de conversion usada
+  description     String?
+  date            DateTime
+  createdAt       DateTime @default(now())
+  fromWallet      Wallet   @relation("ConvertFrom", fields: [fromWalletId], references: [id])
+  toWallet        Wallet   @relation("ConvertTo", fields: [toWalletId], references: [id])
 }
 
 model Transaction {
