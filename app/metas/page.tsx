@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Target, Plus, Trash2, Edit3, Check, X, Trophy } from "lucide-react"
+import { useEffect, useState, useMemo } from "react"
+import { Target, Plus, Trash2, Edit3, Check, X, Trophy, PlusCircle } from "lucide-react"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
 interface Goal {
@@ -21,12 +21,29 @@ const GOAL_CATEGORIES = [
   "Retiro", "Negocio", "Tecnología", "Salud", "Otro",
 ]
 
+function monthsUntil(deadline: string | null): number | null {
+  if (!deadline) return null
+  const diff = new Date(deadline).getTime() - Date.now()
+  const months = diff / (1000 * 60 * 60 * 24 * 30.44)
+  return Math.max(0, Math.ceil(months))
+}
+
+function monthlyNeeded(target: number, current: number, deadline: string | null): number | null {
+  const months = monthsUntil(deadline)
+  if (!months || months <= 0) return null
+  const remaining = target - current
+  if (remaining <= 0) return 0
+  return remaining / months
+}
+
 export default function MetasPage() {
   const [goals, setGoals] = useState<Goal[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
+  const [depositing, setDepositing] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [depositAmount, setDepositAmount] = useState("")
   const [form, setForm] = useState({
     name: "", description: "", targetAmount: "", currentAmount: "0",
     deadline: "", category: GOAL_CATEGORIES[0], color: GOAL_COLORS[0],
@@ -42,6 +59,17 @@ export default function MetasPage() {
 
   useEffect(() => { fetchData() }, [])
 
+  // Real-time monthly calculation for the creation form
+  const formMonthly = useMemo(
+    () => monthlyNeeded(
+      parseFloat(form.targetAmount) || 0,
+      parseFloat(form.currentAmount) || 0,
+      form.deadline || null
+    ),
+    [form.targetAmount, form.currentAmount, form.deadline]
+  )
+  const formMonthsLeft = useMemo(() => monthsUntil(form.deadline || null), [form.deadline])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.targetAmount || parseFloat(form.targetAmount) <= 0) return
@@ -55,9 +83,23 @@ export default function MetasPage() {
       setForm({ name: "", description: "", targetAmount: "", currentAmount: "0", deadline: "", category: GOAL_CATEGORIES[0], color: GOAL_COLORS[0] })
       setShowForm(false)
       fetchData()
-    } finally {
-      setSubmitting(false)
-    }
+    } finally { setSubmitting(false) }
+  }
+
+  const handleDeposit = async (id: string) => {
+    const amount = parseFloat(depositAmount)
+    if (!amount || amount <= 0) return
+    setSubmitting(true)
+    try {
+      await fetch(`/api/goals/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount }),
+      })
+      setDepositing(null)
+      setDepositAmount("")
+      fetchData()
+    } finally { setSubmitting(false) }
   }
 
   const handleSaveEdit = async (id: string) => {
@@ -85,7 +127,9 @@ export default function MetasPage() {
     const days = Math.ceil((new Date(deadline).getTime() - Date.now()) / 86400000)
     if (days < 0) return "Vencida"
     if (days === 0) return "¡Hoy!"
-    return `${days} días`
+    if (days < 30) return `${days} días`
+    const months = Math.ceil(days / 30.44)
+    return `${months} ${months === 1 ? "mes" : "meses"}`
   }
 
   if (loading) {
@@ -103,7 +147,7 @@ export default function MetasPage() {
           <h1 className="text-3xl font-bold text-white flex items-center gap-3">
             <Target style={{ color: "#8B5CF6" }} /> Mis Metas Financieras
           </h1>
-          <p style={{ color: "#64748B" }} className="mt-1">Define y sigue el progreso de tus objetivos</p>
+          <p style={{ color: "#64748B" }} className="mt-1">Define, deposita y sigue el progreso de tus objetivos</p>
         </div>
         <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-2">
           <Plus size={16} /> Nueva Meta
@@ -121,14 +165,14 @@ export default function MetasPage() {
           <div className="text-3xl font-bold text-emerald-400">{completed.length}</div>
         </div>
         <div className="stat-card p-5">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Total a ahorrar</div>
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Por ahorrar</div>
           <div className="text-2xl font-bold text-white">
-            {formatCurrency(active.reduce((s, g) => s + (g.targetAmount - g.currentAmount), 0))}
+            {formatCurrency(active.reduce((s, g) => s + Math.max(0, g.targetAmount - g.currentAmount), 0))}
           </div>
         </div>
       </div>
 
-      {/* Form */}
+      {/* Creation Form */}
       {showForm && (
         <div className="glass-card rounded-2xl p-6 mb-8 fade-in">
           <h2 className="text-lg font-semibold text-white mb-5 flex items-center gap-2">
@@ -160,8 +204,8 @@ export default function MetasPage() {
               </div>
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Fecha límite</label>
-                <input type="date" className="input-dark"
-                  value={form.deadline} onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
+                <input type="date" className="input-dark" value={form.deadline}
+                  onChange={(e) => setForm({ ...form, deadline: e.target.value })} />
               </div>
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Descripción</label>
@@ -169,6 +213,38 @@ export default function MetasPage() {
                   value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               </div>
             </div>
+
+            {/* Real-time monthly calculation */}
+            {formMonthly !== null && parseFloat(form.targetAmount) > 0 && (
+              <div className="mb-4 p-4 rounded-xl flex items-center gap-4 flex-wrap"
+                style={{ background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.25)" }}>
+                <div className="text-2xl">📅</div>
+                <div>
+                  {formMonthly === 0 ? (
+                    <div className="font-semibold text-emerald-400">¡Ya alcanzaste tu meta con lo que tienes!</div>
+                  ) : (
+                    <>
+                      <div className="text-sm font-semibold text-white">
+                        Para alcanzar{" "}
+                        <span style={{ color: "#A78BFA" }}>{formatCurrency(parseFloat(form.targetAmount) || 0)}</span>
+                        {form.deadline && (
+                          <> en <span style={{ color: "#A78BFA" }}>{formMonthsLeft} {formMonthsLeft === 1 ? "mes" : "meses"}</span></>
+                        )}, necesitas ahorrar:
+                      </div>
+                      <div className="text-3xl font-bold mt-0.5" style={{ color: "#A78BFA" }}>
+                        {formatCurrency(formMonthly)}<span className="text-base font-normal" style={{ color: "#7C3AED" }}>/mes</span>
+                      </div>
+                      {parseFloat(form.currentAmount) > 0 && (
+                        <div className="text-xs mt-1" style={{ color: "#64748B" }}>
+                          Restante: {formatCurrency(Math.max(0, (parseFloat(form.targetAmount) || 0) - (parseFloat(form.currentAmount) || 0)))} ÷ {formMonthsLeft} meses
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-3">
               <button type="submit" disabled={submitting}
                 className="py-2.5 px-6 rounded-xl font-semibold text-white transition-all"
@@ -193,27 +269,31 @@ export default function MetasPage() {
             {active.map((goal) => {
               const progress = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100)
               const remaining = goal.targetAmount - goal.currentAmount
+              const monthly = monthlyNeeded(goal.targetAmount, goal.currentAmount, goal.deadline)
               const daysLeft = getDaysRemaining(goal.deadline)
+              const isDepositing = depositing === goal.id
+              const isEditing = editing === goal.id
 
               return (
-                <div key={goal.id} className="glass-card rounded-2xl p-5 fade-in">
-                  {editing === goal.id && editForm ? (
+                <div key={goal.id} className="glass-card rounded-2xl p-5 fade-in"
+                  style={{ borderColor: `${goal.color}20` }}>
+                  {isEditing && editForm ? (
                     <div className="space-y-3">
-                      <input className="input-dark" value={editForm.name}
+                      <input className="input-dark text-sm" placeholder="Nombre" value={editForm.name}
                         onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-xs mb-1 block" style={{ color: "#64748B" }}>Meta</label>
-                          <input type="number" className="input-dark" value={editForm.targetAmount}
+                          <input type="number" className="input-dark text-sm" value={editForm.targetAmount}
                             onChange={(e) => setEditForm({ ...editForm, targetAmount: e.target.value })} />
                         </div>
                         <div>
                           <label className="text-xs mb-1 block" style={{ color: "#64748B" }}>Ahorrado</label>
-                          <input type="number" className="input-dark" value={editForm.currentAmount}
+                          <input type="number" className="input-dark text-sm" value={editForm.currentAmount}
                             onChange={(e) => setEditForm({ ...editForm, currentAmount: e.target.value })} />
                         </div>
                       </div>
-                      <input type="date" className="input-dark" value={editForm.deadline}
+                      <input type="date" className="input-dark text-sm" value={editForm.deadline}
                         onChange={(e) => setEditForm({ ...editForm, deadline: e.target.value })} />
                       <div className="flex gap-2">
                         <button onClick={() => handleSaveEdit(goal.id)}
@@ -230,12 +310,11 @@ export default function MetasPage() {
                     </div>
                   ) : (
                     <>
+                      {/* Header */}
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
-                            style={{ background: `${goal.color}20` }}>
-                            🎯
-                          </div>
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                            style={{ background: `${goal.color}20` }}>🎯</div>
                           <div>
                             <div className="font-semibold text-white">{goal.name}</div>
                             {goal.category && (
@@ -246,7 +325,7 @@ export default function MetasPage() {
                             )}
                           </div>
                         </div>
-                        <div className="flex gap-1.5">
+                        <div className="flex gap-1.5 shrink-0">
                           <button onClick={() => {
                             setEditing(goal.id)
                             setEditForm({
@@ -264,39 +343,91 @@ export default function MetasPage() {
                         </div>
                       </div>
 
+                      {/* Amounts */}
                       <div className="flex justify-between items-end mb-2">
                         <div>
                           <div className="text-xs mb-0.5" style={{ color: "#64748B" }}>Ahorrado</div>
-                          <div className="text-xl font-bold text-white">{formatCurrency(goal.currentAmount)}</div>
+                          <div className="text-2xl font-bold text-white">{formatCurrency(goal.currentAmount)}</div>
                         </div>
                         <div className="text-right">
-                          <div className="text-xs mb-0.5" style={{ color: "#64748B" }}>Falta</div>
-                          <div className="text-lg font-semibold" style={{ color: goal.color }}>{formatCurrency(remaining)}</div>
+                          <div className="text-xs mb-0.5" style={{ color: "#64748B" }}>Meta</div>
+                          <div className="text-lg font-semibold" style={{ color: "#94A3B8" }}>{formatCurrency(goal.targetAmount)}</div>
                         </div>
                       </div>
 
-                      <div className="mb-2">
+                      {/* Progress bar */}
+                      <div className="mb-3">
                         <div className="flex justify-between text-xs mb-1">
                           <span style={{ color: "#64748B" }}>{progress.toFixed(0)}% completado</span>
-                          <span style={{ color: "#64748B" }}>Meta: {formatCurrency(goal.targetAmount)}</span>
+                          <span style={{ color: "#64748B" }}>Falta: {formatCurrency(remaining)}</span>
                         </div>
                         <div className="h-3 rounded-full bg-slate-800 overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-700"
-                            style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${goal.color}cc, ${goal.color})` }}
-                          />
+                          <div className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${goal.color}cc, ${goal.color})` }} />
                         </div>
                       </div>
 
-                      {(goal.deadline || goal.description) && (
-                        <div className="flex items-center gap-3 mt-3 text-xs" style={{ color: "#64748B" }}>
-                          {goal.deadline && (
-                            <span style={{ color: daysLeft === "Vencida" ? "#EF4444" : daysLeft === "¡Hoy!" ? "#F59E0B" : "#64748B" }}>
-                              ⏰ {daysLeft} • {formatDate(goal.deadline)}
+                      {/* Monthly needed + deadline */}
+                      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                        {monthly !== null && monthly > 0 && (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
+                            style={{ background: `${goal.color}12`, border: `1px solid ${goal.color}25` }}>
+                            <span className="text-xs" style={{ color: "#64748B" }}>Ahorra</span>
+                            <span className="text-sm font-bold" style={{ color: goal.color }}>
+                              {formatCurrency(monthly)}/mes
                             </span>
-                          )}
-                          {goal.description && <span>📝 {goal.description}</span>}
+                            {goal.deadline && (
+                              <span className="text-xs" style={{ color: "#64748B" }}>
+                                para cumplirla en {getDaysRemaining(goal.deadline)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {goal.deadline && !monthly && (
+                          <span className="text-xs" style={{ color: "#64748B" }}>
+                            ⏰ {daysLeft} · {formatDate(goal.deadline)}
+                          </span>
+                        )}
+                      </div>
+
+                      {goal.description && (
+                        <div className="text-xs mb-3" style={{ color: "#64748B" }}>📝 {goal.description}</div>
+                      )}
+
+                      {/* Deposit section */}
+                      {isDepositing ? (
+                        <div className="flex gap-2 mt-1">
+                          <input
+                            type="number" step="0.01" min="0"
+                            className="input-dark text-sm flex-1"
+                            placeholder="Monto a depositar"
+                            value={depositAmount}
+                            onChange={(e) => setDepositAmount(e.target.value)}
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleDeposit(goal.id)
+                              if (e.key === "Escape") { setDepositing(null); setDepositAmount("") }
+                            }}
+                          />
+                          <button onClick={() => handleDeposit(goal.id)} disabled={submitting}
+                            className="px-4 py-2 rounded-xl text-sm font-semibold text-white shrink-0"
+                            style={{ background: goal.color }}>
+                            {submitting ? "..." : "✓ Agregar"}
+                          </button>
+                          <button onClick={() => { setDepositing(null); setDepositAmount("") }}
+                            className="px-3 py-2 rounded-xl text-sm shrink-0"
+                            style={{ background: "rgba(255,255,255,0.06)", color: "#94A3B8" }}>
+                            ✕
+                          </button>
                         </div>
+                      ) : (
+                        <button
+                          onClick={() => { setDepositing(goal.id); setDepositAmount("") }}
+                          className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all hover:opacity-90"
+                          style={{ background: `${goal.color}20`, color: goal.color, border: `1px solid ${goal.color}30` }}>
+                          <PlusCircle size={15} />
+                          Agregar dinero a esta meta
+                        </button>
                       )}
                     </>
                   )}
@@ -317,12 +448,10 @@ export default function MetasPage() {
             {completed.map((goal) => (
               <div key={goal.id} className="p-5 rounded-2xl relative overflow-hidden"
                 style={{ background: "rgba(16,185,129,0.05)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                <div className="absolute top-3 right-3 text-2xl">🏆</div>
+                <div className="absolute top-3 right-10 text-2xl">🏆</div>
                 <div className="font-semibold text-white mb-1">{goal.name}</div>
                 <div className="text-emerald-400 font-bold text-xl">{formatCurrency(goal.targetAmount)}</div>
-                <div className="text-xs mt-2" style={{ color: "#64748B" }}>
-                  ¡Meta alcanzada! · {formatDate(goal.createdAt)}
-                </div>
+                <div className="text-xs mt-2" style={{ color: "#64748B" }}>¡Meta alcanzada!</div>
                 <div className="mt-3 h-2 rounded-full overflow-hidden" style={{ background: "rgba(16,185,129,0.2)" }}>
                   <div className="h-full w-full rounded-full" style={{ background: "#10B981" }} />
                 </div>
@@ -339,7 +468,7 @@ export default function MetasPage() {
         <div className="text-center py-20">
           <div className="text-6xl mb-4">🎯</div>
           <div className="text-xl font-semibold text-white mb-2">Sin metas aún</div>
-          <p style={{ color: "#64748B" }} className="mb-6">Define tus objetivos financieros y sigue tu progreso</p>
+          <p style={{ color: "#64748B" }} className="mb-6">Define tus objetivos financieros — la app te dirá cuánto ahorrar cada mes</p>
           <button onClick={() => setShowForm(true)} className="btn-primary">
             Crear mi primera meta
           </button>

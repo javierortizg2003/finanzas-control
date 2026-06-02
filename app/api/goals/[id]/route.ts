@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const body = await request.json()
+  const goal = await prisma.goal.update({
+    where: { id },
+    data: { currentAmount: { increment: parseFloat(body.amount) } },
+  })
+  return NextResponse.json(goal)
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
