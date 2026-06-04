@@ -1,25 +1,30 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../app/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
   provider = "postgresql"
 }
 
+// Wallet types: CREDIT_CARD | DEBIT_CARD | CASH | BANK_ACCOUNT | SAVINGS | INVESTMENT | EMERGENCY_FUND
 model Wallet {
-  id           String        @id @default(cuid())
-  name         String
-  type         String        // checking|savings|investment|cash|credit|debit
-  bank         String?
-  currency     String        @default("MXN") // MXN|USD|EUR|BTC|etc
-  balance      Float         @default(0)
-  color        String        @default("#10B981")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  userId         String
+  name           String
+  type           String        // CREDIT_CARD|DEBIT_CARD|CASH|BANK_ACCOUNT|SAVINGS|INVESTMENT|EMERGENCY_FUND
+  bank           String?
+  currency       String        @default("MXN")
+  balance        Float         @default(0)
+  initialBalance Float?        @default(0)
+  creditLimit    Float?
+  color          String        @default("#10B981")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   transactions   Transaction[]
-  transfersOut   Transfer[]      @relation("TransferFrom")
-  transfersIn    Transfer[]      @relation("TransferTo")
+  transfersOut   Transfer[]          @relation("TransferFrom")
+  transfersIn    Transfer[]          @relation("TransferTo")
   savingDeposits SavingDeposit[]
   conversionsOut CurrencyConversion[] @relation("ConvertFrom")
   conversionsIn  CurrencyConversion[] @relation("ConvertTo")
@@ -33,8 +38,8 @@ model Transfer {
   description  String?
   date         DateTime
   createdAt    DateTime @default(now())
-  fromWallet   Wallet   @relation("TransferFrom", fields: [fromWalletId], references: [id])
-  toWallet     Wallet   @relation("TransferTo", fields: [toWalletId], references: [id])
+  fromWallet   Wallet   @relation("TransferFrom", fields: [fromWalletId], references: [id], onDelete: Cascade)
+  toWallet     Wallet   @relation("TransferTo",   fields: [toWalletId],   references: [id], onDelete: Cascade)
 }
 
 model CurrencyConversion {
@@ -47,12 +52,13 @@ model CurrencyConversion {
   description     String?
   date            DateTime
   createdAt       DateTime @default(now())
-  fromWallet      Wallet   @relation("ConvertFrom", fields: [fromWalletId], references: [id])
-  toWallet        Wallet   @relation("ConvertTo", fields: [toWalletId], references: [id])
+  fromWallet      Wallet   @relation("ConvertFrom", fields: [fromWalletId], references: [id], onDelete: Cascade)
+  toWallet        Wallet   @relation("ConvertTo",   fields: [toWalletId],   references: [id], onDelete: Cascade)
 }
 
 model Transaction {
   id          String   @id @default(cuid())
+  userId      String
   type        String
   amount      Float
   category    String
@@ -61,11 +67,12 @@ model Transaction {
   walletId    String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  wallet      Wallet?  @relation(fields: [walletId], references: [id])
+  wallet      Wallet?  @relation(fields: [walletId], references: [id], onDelete: Cascade)
 }
 
 model Saving {
   id           String          @id @default(cuid())
+  userId       String
   name         String
   institution  String?
   type         String
@@ -85,23 +92,29 @@ model SavingDeposit {
   walletId  String?  // source wallet for deposits, destination for withdrawals
   createdAt DateTime @default(now())
   saving    Saving   @relation(fields: [savingId], references: [id], onDelete: Cascade)
-  wallet    Wallet?  @relation(fields: [walletId], references: [id])
+  wallet    Wallet?  @relation(fields: [walletId], references: [id], onDelete: SetNull)
 }
 
 model Debt {
-  id             String   @id @default(cuid())
-  name           String
-  balance        Float
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  balance         Float
   originalBalance Float
-  interestRate   Float
-  minimumPayment Float
-  type           String   @default("other")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  interestRate    Float
+  minimumPayment  Float
+  type            String   @default("other")
+  termMonths      Int?
+  lifeInsurance   Float?   @default(0)
+  debtInsurance   Float?   @default(0)
+  isMixedRate     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Goal {
   id            String    @id @default(cuid())
+  userId        String
   name          String
   description   String?
   targetAmount  Float
@@ -111,4 +124,34 @@ model Goal {
   color         String    @default("#10B981")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+// Exchange rate between two currencies (latest known — upserted on each CurrencyConversion)
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  fromCurrency String
+  toCurrency   String
+  rate         Float
+  updatedAt    DateTime @updatedAt
+
+  @@unique([fromCurrency, toCurrency])
+}
+
+// Per-user app preferences stored server-side
+model UserPreference {
+  userId       String   @id
+  baseCurrency String   @default("MXN")
+  updatedAt    DateTime @updatedAt
+}
+
+// Asset types: REAL_ESTATE | VEHICLE | OTHER
+model Asset {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  type         String   // REAL_ESTATE|VEHICLE|OTHER
+  currentValue Float
+  description  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

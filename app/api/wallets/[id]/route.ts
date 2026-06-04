@@ -1,30 +1,49 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
 import { prisma } from "@/lib/prisma"
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
+  const wallet = await prisma.wallet.findUnique({ where: { id } })
+  if (!wallet || wallet.userId !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   const body = await request.json()
-  const wallet = await prisma.wallet.update({
+  const updated = await prisma.wallet.update({
     where: { id },
     data: {
       name: body.name,
       type: body.type,
       bank: body.bank || null,
+      currency: body.currency || "MXN",
       balance: parseFloat(body.balance || 0),
+      creditLimit: body.creditLimit ? parseFloat(body.creditLimit) : null,
       color: body.color || "#10B981",
     },
   })
-  return NextResponse.json(wallet)
+  return NextResponse.json(updated)
 }
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
+  const wallet = await prisma.wallet.findUnique({ where: { id } })
+  if (!wallet || wallet.userId !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   await prisma.wallet.delete({ where: { id } })
   return NextResponse.json({ success: true })
 }

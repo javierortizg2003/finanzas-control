@@ -2,14 +2,17 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { UserButton } from "@clerk/nextjs"
 import {
   LayoutDashboard, TrendingUp, TrendingDown, PiggyBank,
   BarChart3, Calculator, Target, DollarSign, Wallet, CreditCard, Settings,
+  Eye, EyeOff, Landmark,
 } from "lucide-react"
 import ThemeToggle from "./ThemeToggle"
+import { usePrivacy } from "@/components/providers/PrivacyProvider"
 
 const navItems = [
-  { href: "/", icon: LayoutDashboard, label: "Dashboard" },
+  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
   { href: "/carteras", icon: Wallet, label: "Carteras" },
   { href: "/ingresos", icon: TrendingUp, label: "Ingresos" },
   { href: "/gastos", icon: TrendingDown, label: "Gastos" },
@@ -18,12 +21,15 @@ const navItems = [
   { href: "/presupuesto", icon: BarChart3, label: "Presupuesto" },
   { href: "/calculadora", icon: Calculator, label: "Calculadora" },
   { href: "/metas", icon: Target, label: "Metas" },
+  { href: "/activos", icon: Landmark, label: "Activos" },
   { href: "/configuracion", icon: Settings, label: "Configuración" },
 ]
 
 export default function Navigation() {
   const pathname = usePathname()
   const isCarteras = pathname.startsWith("/carteras")
+  const isDashboard = pathname === "/dashboard"
+  const { isPrivate, togglePrivacy } = usePrivacy()
 
   return (
     <>
@@ -48,7 +54,7 @@ export default function Navigation() {
 
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map(({ href, icon: Icon, label }) => {
-            const active = href === "/carteras" ? isCarteras : pathname === href
+            const active = href === "/carteras" ? isCarteras : href === "/dashboard" ? isDashboard : pathname === href
             return (
               <Link key={href} href={href}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
@@ -65,13 +71,41 @@ export default function Navigation() {
         </nav>
 
         <div className="p-4 border-t space-y-3" style={{ borderColor: "rgba(16,185,129,0.1)" }}>
-          <ThemeToggle />
+          <div className="flex items-center justify-between">
+            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={togglePrivacy}
+                title={isPrivate ? "Mostrar montos" : "Ocultar montos"}
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+                style={{
+                  background: isPrivate ? "rgba(16,185,129,0.15)" : "transparent",
+                  border: isPrivate ? "1px solid rgba(16,185,129,0.3)" : "1px solid transparent",
+                }}>
+                {isPrivate
+                  ? <EyeOff size={16} style={{ color: "#10B981" }} />
+                  : <Eye size={16} style={{ color: "#64748B" }} />}
+              </button>
+              <UserButton />
+            </div>
+          </div>
           <div className="text-xs text-center" style={{ color: "#475569" }}>Tu camino a la libertad 🚀</div>
         </div>
       </aside>
 
-      {/* Mobile: top-right theme toggle + bottom nav */}
-      <div className="md:hidden fixed top-3 right-3 z-50">
+      {/* Mobile: top-right controls */}
+      <div className="md:hidden fixed top-3 right-3 z-50 flex items-center gap-2">
+        <button
+          onClick={togglePrivacy}
+          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{
+            background: isPrivate ? "rgba(16,185,129,0.15)" : "var(--bg-input)",
+            border: "1px solid rgba(16,185,129,0.2)",
+          }}>
+          {isPrivate
+            ? <EyeOff size={15} style={{ color: "#10B981" }} />
+            : <Eye size={15} style={{ color: "#64748B" }} />}
+        </button>
         <ThemeToggle compact />
       </div>
 

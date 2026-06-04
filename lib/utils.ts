@@ -320,12 +320,13 @@ export const BUDGET_METHODS = {
 }
 
 export const WALLET_TYPES = [
-  { value: "checking", label: "Cuenta Corriente / Nómina", icon: "🏦", color: "#10B981" },
-  { value: "savings", label: "Cuenta de Ahorro", icon: "💰", color: "#6366F1" },
-  { value: "investment", label: "Inversión / Broker", icon: "📈", color: "#F59E0B" },
-  { value: "cash", label: "Efectivo", icon: "💵", color: "#22C55E" },
-  { value: "credit", label: "Tarjeta de Crédito", icon: "💳", color: "#EF4444" },
-  { value: "debit", label: "Tarjeta de Débito", icon: "💳", color: "#8B5CF6" },
+  { value: "BANK_ACCOUNT",    label: "Cuenta Bancaria / Nómina", icon: "🏦", color: "#10B981" },
+  { value: "SAVINGS",         label: "Cuenta de Ahorro",         icon: "💰", color: "#6366F1" },
+  { value: "INVESTMENT",      label: "Inversión / Broker",       icon: "📈", color: "#F59E0B" },
+  { value: "CASH",            label: "Efectivo",                 icon: "💵", color: "#22C55E" },
+  { value: "CREDIT_CARD",     label: "Tarjeta de Crédito",       icon: "💳", color: "#EF4444" },
+  { value: "DEBIT_CARD",      label: "Tarjeta de Débito",        icon: "💳", color: "#8B5CF6" },
+  { value: "EMERGENCY_FUND",  label: "Fondo de Emergencia",      icon: "🛡️", color: "#14B8A6" },
 ]
 
 export function getWalletType(type: string) {

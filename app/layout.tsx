@@ -1,7 +1,8 @@
 import type { Metadata } from "next"
 import { Geist } from "next/font/google"
 import "./globals.css"
-import Navigation from "@/components/Navigation"
+import { ClerkProvider } from "@clerk/nextjs"
+import { PrivacyProvider } from "@/components/providers/PrivacyProvider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,14 +21,14 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="es" className={`${geistSans.variable} h-full`}>
-      <body className="min-h-full" style={{ background: "#060D1F" }}>
-        <Navigation />
-        {/* Offset content for sidebar on desktop, bottom nav on mobile */}
-        <main className="md:ml-60 pb-24 md:pb-0 min-h-screen">
-          {children}
-        </main>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="es" className={`${geistSans.variable} h-full`}>
+        <body className="min-h-full">
+          <PrivacyProvider>
+            {children}
+          </PrivacyProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   )
 }

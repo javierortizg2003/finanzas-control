@@ -1,27 +1,44 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
 import { prisma } from "@/lib/prisma"
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
+  const goal = await prisma.goal.findUnique({ where: { id } })
+  if (!goal || goal.userId !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   const body = await request.json()
-  const goal = await prisma.goal.update({
+  const updated = await prisma.goal.update({
     where: { id },
     data: { currentAmount: { increment: parseFloat(body.amount) } },
   })
-  return NextResponse.json(goal)
+  return NextResponse.json(updated)
 }
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
+  const goal = await prisma.goal.findUnique({ where: { id } })
+  if (!goal || goal.userId !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   const body = await request.json()
 
-  const goal = await prisma.goal.update({
+  const updated = await prisma.goal.update({
     where: { id },
     data: {
       name: body.name,
@@ -34,14 +51,22 @@ export async function PUT(
     },
   })
 
-  return NextResponse.json(goal)
+  return NextResponse.json(updated)
 }
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
+  const goal = await prisma.goal.findUnique({ where: { id } })
+  if (!goal || goal.userId !== userId) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   await prisma.goal.delete({ where: { id } })
   return NextResponse.json({ success: true })
 }

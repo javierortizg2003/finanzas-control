@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
+import { auth } from "@clerk/nextjs/server"
 import { prisma } from "@/lib/prisma"
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { userId } = await auth()
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { id } = await params
 
   const [wallet, transactions, transfersOut, transfersIn] = await Promise.all([
@@ -20,7 +24,7 @@ export async function GET(
     }),
   ])
 
-  if (!wallet) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  if (!wallet || wallet.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   type RawMovement = {
     id: string; date: Date; description: string; category: string
