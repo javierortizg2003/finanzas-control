@@ -4,46 +4,31 @@ import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { PlusCircle, Loader2, CheckCircle2 } from "lucide-react"
 
-const EXPENSE_CATEGORIES = [
-  "Alimentación",
-  "Transporte",
-  "Restaurantes",
-  "Entretenimiento",
-  "Servicios",
-  "Salud",
-  "Ropa",
-  "Educación",
-  "Suscripciones",
-  "Vivienda",
-  "Viajes",
-  "Mascotas",
-  "Deudas",
-  "Otros",
-]
-
-interface Wallet {
-  id: string
-  name: string
-  currency: string
-}
+interface Category { id: string; name: string; color: string }
+interface Wallet { id: string; name: string; currency: string }
 
 export default function QuickExpenseForm() {
   const router = useRouter()
+  const [categories, setCategories] = useState<Category[]>([])
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [amount, setAmount] = useState("")
   const [description, setDescription] = useState("")
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0])
+  const [category, setCategory] = useState("")
   const [walletId, setWalletId] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [success, setSuccess] = useState(false)
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    fetch("/api/wallets")
-      .then((r) => r.json())
-      .then((data: Wallet[]) => {
-        setWallets(data)
-        if (data.length > 0) setWalletId(data[0].id)
+    Promise.all([
+      fetch("/api/wallets").then((r) => r.json()),
+      fetch("/api/categories?type=expense").then((r) => r.json()),
+    ])
+      .then(([ws, cats]: [Wallet[], Category[]]) => {
+        setWallets(ws)
+        if (ws.length > 0) setWalletId(ws[0].id)
+        setCategories(cats)
+        if (cats.length > 0) setCategory(cats[0].name)
       })
       .catch(() => {})
   }, [])
@@ -70,7 +55,7 @@ export default function QuickExpenseForm() {
       if (res.ok) {
         setAmount("")
         setDescription("")
-        setCategory(EXPENSE_CATEGORIES[0])
+        setCategory(categories.length > 0 ? categories[0].name : "")
         if (wallets.length > 0) setWalletId(wallets[0].id)
         setSuccess(true)
         router.refresh()
@@ -136,10 +121,13 @@ export default function QuickExpenseForm() {
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               style={inputStyle}
+              disabled={categories.length === 0}
             >
-              {EXPENSE_CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
+              {categories.length === 0
+                ? <option value="">Cargando...</option>
+                : categories.map((cat) => (
+                    <option key={cat.id} value={cat.name}>{cat.name}</option>
+                  ))}
             </select>
           </div>
 
@@ -165,12 +153,12 @@ export default function QuickExpenseForm() {
         <div className="flex items-center gap-3 mt-4">
           <button
             type="submit"
-            disabled={submitting || !amount}
+            disabled={submitting || !amount || !walletId}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all"
             style={{
-              background: submitting || !amount ? "rgba(16,185,129,0.3)" : "linear-gradient(135deg,#059669,#10B981)",
+              background: submitting || !amount || !walletId ? "rgba(16,185,129,0.3)" : "linear-gradient(135deg,#059669,#10B981)",
               color: "white",
-              cursor: submitting || !amount ? "not-allowed" : "pointer",
+              cursor: submitting || !amount || !walletId ? "not-allowed" : "pointer",
             }}
           >
             {submitting

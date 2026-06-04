@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
@@ -35,13 +36,16 @@ interface Stats {
 }
 
 function StatCard({
-  label, value, icon: Icon, color, subtitle, trend,
+  label, value, icon: Icon, color, subtitle, trend, href,
 }: {
   label: string; value: React.ReactNode; icon: React.ElementType
-  color: string; subtitle?: string; trend?: "up" | "down"
+  color: string; subtitle?: string; trend?: "up" | "down"; href?: string
 }) {
-  return (
-    <div className="stat-card p-5 fade-in">
+  const inner = (
+    <div
+      className="stat-card p-5 fade-in transition-all duration-150"
+      style={href ? { cursor: "pointer" } : undefined}
+    >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <div className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>
@@ -50,7 +54,7 @@ function StatCard({
           <div className="text-xl font-bold text-white truncate">{value}</div>
           {subtitle && <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{subtitle}</div>}
         </div>
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center ml-3 shrink-0"
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center ml-3 shrink-0 transition-colors duration-150"
           style={{ background: `${color}20`, border: `1px solid ${color}30` }}>
           <Icon size={20} style={{ color }} />
         </div>
@@ -67,8 +71,23 @@ function StatCard({
           </span>
         </div>
       )}
+      {href && (
+        <div className="mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <ArrowUpRight size={12} style={{ color }} />
+          <span className="text-xs" style={{ color }}>Ver detalle</span>
+        </div>
+      )}
     </div>
   )
+
+  if (href) {
+    return (
+      <Link href={href} className="block group hover:scale-[1.025] transition-transform duration-150">
+        {inner}
+      </Link>
+    )
+  }
+  return inner
 }
 
 export default function DashboardPage() {
@@ -128,14 +147,14 @@ export default function DashboardPage() {
           value={<MaskedAmount amount={stats.monthlyIncome} />}
           icon={TrendingUp}
           color="#10B981"
-          trend="up"
+          href="/ingresos"
         />
         <StatCard
           label="Gastos este mes"
           value={<MaskedAmount amount={stats.monthlyExpenses} />}
           icon={TrendingDown}
           color="#EF4444"
-          trend="down"
+          href="/gastos"
         />
         <StatCard
           label="Tasa de ahorro"
@@ -143,6 +162,7 @@ export default function DashboardPage() {
           icon={PiggyBank}
           color="#3B82F6"
           subtitle={isPrivate ? undefined : `${stats.savingsRate.toFixed(1)}% del ingreso`}
+          href="/ahorros"
         />
         <StatCard
           label="Salud financiera"
@@ -150,6 +170,7 @@ export default function DashboardPage() {
           icon={Zap}
           color="#F59E0B"
           subtitle={getHealthLabel(stats.healthScore).label}
+          href="/metas"
         />
         <StatCard
           label={`Patrimonio neto (${stats.baseCurrency})`}
@@ -159,6 +180,7 @@ export default function DashboardPage() {
           subtitle={stats.unconvertedWalletCount > 0
             ? `⚠ ${stats.unconvertedWalletCount} cartera(s) excluida(s) por falta de tasa`
             : undefined}
+          href="/carteras"
         />
       </div>
 

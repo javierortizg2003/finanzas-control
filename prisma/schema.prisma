@@ -155,3 +155,39 @@ model Asset {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+// User-specific categories (income or expense). Seeded with defaults on first load.
+model Category {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  type      String   // "income" | "expense"
+  color     String   @default("#94A3B8")
+  macro     String?  // "Necesidades" | "Deseos" | "Ahorro/Inversión" — only for expense
+  createdAt DateTime @default(now())
+
+  @@unique([userId, name, type])
+}
+
+// Per-user budget rule: % split across the 3 macro groups
+model BudgetRule {
+  userId     String   @id
+  needsPct   Float    @default(50)
+  wantsPct   Float    @default(30)
+  savingsPct Float    @default(20)
+  updatedAt  DateTime @updatedAt
+}
+
+// Per-category budget per quincena: half 1=Q1 (1-15), half 2=Q2 (16-fin)
+model CategoryBudget {
+  id        String   @id @default(cuid())
+  userId    String
+  category  String
+  amount    Float    @default(0)
+  month     Int
+  year      Int
+  half      Int      @default(1) // 1=Q1, 2=Q2
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, category, month, year, half])
+}

@@ -5,63 +5,132 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis,
 } from "recharts"
-import { TrendingUp, Plus, Trash2, Search, X } from "lucide-react"
-import { formatCurrency, formatDate, INCOME_CATEGORIES, CATEGORY_COLORS } from "@/lib/utils"
+import { TrendingUp, Plus, Trash2, Search, X, Pencil, Check } from "lucide-react"
+import { formatCurrency, formatDate, CATEGORY_COLORS } from "@/lib/utils"
 import MaskedAmount from "@/components/ui/MaskedAmount"
 
+interface Category { id: string; name: string; color: string }
 interface Wallet { id: string; name: string; color: string; type: string; balance: number }
 interface Transaction {
   id: string; type: string; amount: number; category: string
   description: string | null; date: string; createdAt: string
   wallet: { id: string; name: string; color: string; type: string } | null
 }
+interface EditForm { amount: string; category: string; description: string; date: string; walletId: string }
 
 export default function IngresosPage() {
+  const [categories, setCategories] = useState<Category[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [wallets, setWallets] = useState<Wallet[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [search, setSearch] = useState({ text: "", dateFrom: "", dateTo: "", amountMin: "", amountMax: "" })
   const [form, setForm] = useState({
-    amount: "", category: INCOME_CATEGORIES[0], description: "",
+    amount: "", category: "", description: "",
     date: new Date().toISOString().split("T")[0], walletId: "",
   })
+  const [newCatName, setNewCatName] = useState("")
+  const [showAddCat, setShowAddCat] = useState(false)
+  const [addingCat, setAddingCat] = useState(false)
+  const [walletError, setWalletError] = useState(false)
+  // edit state
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>({ amount: "", category: "", description: "", date: "", walletId: "" })
+  const [saving, setSaving] = useState(false)
+
+  const fetchCategories = () =>
+    fetch("/api/categories?type=income")
+      .then((r) => r.json())
+      .then((cats: Category[]) => {
+        setCategories(cats)
+        setForm((f) => ({ ...f, category: f.category || cats[0]?.name || "" }))
+      })
+      .catch(() => {})
 
   const fetchData = () => {
     Promise.all([
       fetch("/api/transactions?type=income").then((r) => r.json()),
       fetch("/api/wallets").then((r) => r.json()),
-    ]).then(([txs, ws]) => {
+    ]).then(([txs, ws]: [Transaction[], Wallet[]]) => {
       setTransactions(txs)
       setWallets(ws)
+      if (ws.length > 0) setForm((f) => ({ ...f, walletId: f.walletId || ws[0].id }))
     }).finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchData() }, [])
+  useEffect(() => { fetchCategories(); fetchData() }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!form.walletId) { setWalletError(true); return }
     if (!form.amount || parseFloat(form.amount) <= 0) return
+    setWalletError(false)
     setSubmitting(true)
     try {
-      await fetch("/api/transactions", {
+      const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, type: "income", walletId: form.walletId || null }),
+        body: JSON.stringify({ ...form, type: "income", walletId: form.walletId }),
       })
-      setForm({ amount: "", category: INCOME_CATEGORIES[0], description: "", date: new Date().toISOString().split("T")[0], walletId: form.walletId })
-      fetchData()
+      if (res.ok) {
+        setForm((f) => ({
+          amount: "", category: categories[0]?.name || f.category,
+          description: "", date: new Date().toISOString().split("T")[0], walletId: f.walletId,
+        }))
+        fetchData()
+      }
     } finally { setSubmitting(false) }
   }
 
   const handleDelete = async (id: string) => {
     if (!confirm("¿Eliminar este ingreso?")) return
     const res = await fetch(`/api/transactions/${id}`, { method: "DELETE" })
-    if (!res.ok) {
-      alert("No se pudo eliminar el ingreso. Intenta de nuevo.")
-      return
-    }
-    fetchData() // refresca wallets también porque el saldo cambia
+    if (!res.ok) { alert("No se pudo eliminar."); return }
+    fetchData()
+  }
+
+  const startEdit = (tx: Transaction) => {
+    setEditingId(tx.id)
+    setEditForm({
+      amount: tx.amount.toString(),
+      category: tx.category,
+      description: tx.description || "",
+      date: new Date(tx.date).toISOString().split("T")[0],
+      walletId: tx.wallet?.id || wallets[0]?.id || "",
+    })
+  }
+
+  const handleSaveEdit = async (id: string) => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/transactions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      })
+      if (res.ok) { setEditingId(null); fetchData() }
+      else { alert("No se pudo guardar el cambio.") }
+    } finally { setSaving(false) }
+  }
+
+  const handleAddCategory = async () => {
+    if (!newCatName.trim()) return
+    setAddingCat(true)
+    try {
+      const res = await fetch("/api/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newCatName.trim(), type: "income" }),
+      })
+      if (res.ok) {
+        setNewCatName(""); setShowAddCat(false)
+        await fetchCategories()
+        const data = await res.json()
+        setForm((f) => ({ ...f, category: data.name }))
+      } else {
+        const err = await res.json(); alert(err.error || "Error al crear categoría")
+      }
+    } finally { setAddingCat(false) }
   }
 
   const now = new Date()
@@ -72,11 +141,15 @@ export default function IngresosPage() {
   const totalMonth = thisMonth.reduce((s, t) => s + t.amount, 0)
   const totalAll = transactions.reduce((s, t) => s + t.amount, 0)
 
-  const categoryData = INCOME_CATEGORIES.map((cat) => ({
-    name: cat,
-    value: transactions.filter((t) => t.category === cat).reduce((s, t) => s + t.amount, 0),
-    color: CATEGORY_COLORS[cat] || "#94A3B8",
-  })).filter((c) => c.value > 0)
+  const catMap = Object.fromEntries(categories.map((c) => [c.name, c.color]))
+
+  const categoryData = (() => {
+    const grouped: Record<string, number> = {}
+    for (const t of transactions) grouped[t.category] = (grouped[t.category] || 0) + t.amount
+    return Object.entries(grouped)
+      .map(([name, value]) => ({ name, value, color: catMap[name] || CATEGORY_COLORS[name] || "#94A3B8" }))
+      .sort((a, b) => b.value - a.value)
+  })()
 
   const filtered = transactions.filter((t) => {
     if (search.text) {
@@ -92,14 +165,15 @@ export default function IngresosPage() {
   const hasFilters = Object.values(search).some(Boolean)
 
   const monthlyData = Array.from({ length: 6 }, (_, i) => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - (5 - i))
+    const d = new Date(); d.setMonth(d.getMonth() - (5 - i))
     const month = d.toLocaleDateString("es-MX", { month: "short" })
     const value = transactions
       .filter((t) => { const td = new Date(t.date); return td.getMonth() === d.getMonth() && td.getFullYear() === d.getFullYear() })
       .reduce((s, t) => s + t.amount, 0)
     return { month, value }
   })
+
+  const inputSm = "input-dark text-xs py-1.5"
 
   if (loading) {
     return (
@@ -150,25 +224,46 @@ export default function IngresosPage() {
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Categoría</label>
               <select className="input-dark" value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                {INCOME_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
               </select>
+              {!showAddCat ? (
+                <button type="button" onClick={() => setShowAddCat(true)}
+                  className="mt-1.5 text-xs transition-colors" style={{ color: "#64748B" }}>
+                  + Agregar categoría personalizada
+                </button>
+              ) : (
+                <div className="flex gap-2 mt-2">
+                  <input type="text" placeholder="Ej: Comisiones, Bono..." className="input-dark text-xs flex-1"
+                    value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddCategory())} autoFocus />
+                  <button type="button" onClick={handleAddCategory} disabled={addingCat || !newCatName.trim()}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                    style={{ background: "rgba(16,185,129,0.2)", color: "#10B981" }}>
+                    {addingCat ? "..." : "Agregar"}
+                  </button>
+                  <button type="button" onClick={() => { setShowAddCat(false); setNewCatName("") }}
+                    className="px-2 text-xs" style={{ color: "#64748B" }}>✕</button>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
-                Entra a la cuenta
+                Entra a la cuenta *
               </label>
               <select className="input-dark" value={form.walletId}
-                onChange={(e) => setForm({ ...form, walletId: e.target.value })}>
-                <option value="">Sin asignar</option>
+                onChange={(e) => { setForm({ ...form, walletId: e.target.value }); setWalletError(false) }}
+                required>
+                <option value="" disabled>Selecciona una cartera</option>
                 {wallets.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} — {formatCurrency(w.balance)}
-                  </option>
+                  <option key={w.id} value={w.id}>{w.name} — {formatCurrency(w.balance)}</option>
                 ))}
               </select>
-              {form.walletId && (
+              {walletError && (
+                <p className="mt-1 text-xs text-emerald-400">Debes seleccionar una cartera</p>
+              )}
+              {form.walletId && !walletError && (
                 <div className="mt-1 text-xs" style={{ color: "#10B981" }}>
-                  ✓ El saldo de la cartera se actualizará automáticamente
+                  ✓ El saldo se actualizará automáticamente
                 </div>
               )}
             </div>
@@ -182,7 +277,9 @@ export default function IngresosPage() {
               <input type="date" required className="input-dark" value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })} />
             </div>
-            <button type="submit" disabled={submitting} className="btn-primary w-full">
+            <button type="submit" disabled={submitting || !form.walletId}
+              className="btn-primary w-full"
+              style={{ opacity: !form.walletId ? 0.4 : 1, cursor: !form.walletId ? "not-allowed" : "pointer" }}>
               {submitting ? "Guardando..." : "Registrar Ingreso"}
             </button>
           </form>
@@ -195,8 +292,7 @@ export default function IngresosPage() {
             <>
               <ResponsiveContainer width="100%" height={160}>
                 <PieChart>
-                  <Pie data={categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={65}
-                    paddingAngle={3} dataKey="value">
+                  <Pie data={categoryData} cx="50%" cy="50%" innerRadius={40} outerRadius={65} paddingAngle={3} dataKey="value">
                     {categoryData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
                   <Tooltip formatter={(v) => formatCurrency(Number(v))} />
@@ -249,11 +345,10 @@ export default function IngresosPage() {
           )}
         </div>
 
-        {/* Search bar */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5 p-4 rounded-xl" style={{ background: "var(--bg-hover)" }}>
           <div className="lg:col-span-2 relative">
             <Search size={14} className="absolute left-3 top-3" style={{ color: "#64748B" }} />
-            <input className="input-dark pl-8 text-sm" placeholder="Buscar por descripción, categoría, monto..."
+            <input className="input-dark pl-8 text-sm" placeholder="Buscar..."
               value={search.text} onChange={(e) => setSearch({ ...search, text: e.target.value })} />
           </div>
           <div>
@@ -275,48 +370,98 @@ export default function IngresosPage() {
         {transactions.length === 0 ? (
           <div className="text-center py-10" style={{ color: "#475569" }}>No hay ingresos registrados.</div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-10" style={{ color: "#475569" }}>Ningún ingreso coincide con los filtros aplicados.</div>
+          <div className="text-center py-10" style={{ color: "#475569" }}>Ningún ingreso coincide con los filtros.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: "1px solid rgba(16,185,129,0.1)" }}>
                   {["Fecha", "Categoría", "Cuenta", "Descripción", "Monto", ""].map((h) => (
-                    <th key={h} className="text-left pb-3 pr-4 text-xs font-medium uppercase tracking-wider"
-                      style={{ color: "#64748B" }}>{h}</th>
+                    <th key={h} className="text-left pb-3 pr-4 text-xs font-medium uppercase tracking-wider" style={{ color: "#64748B" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((tx) => (
-                  <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
-                    className="hover:bg-white/5 transition-colors">
-                    <td className="py-3 pr-4" style={{ color: "#94A3B8" }}>{formatDate(tx.date)}</td>
-                    <td className="py-3 pr-4">
-                      <span className="px-2 py-0.5 rounded-full text-xs font-medium"
-                        style={{ background: `${CATEGORY_COLORS[tx.category] || "#94A3B8"}20`, color: CATEGORY_COLORS[tx.category] || "#94A3B8" }}>
-                        {tx.category}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4">
-                      {tx.wallet ? (
-                        <span className="flex items-center gap-1.5 text-xs">
-                          <span className="w-2 h-2 rounded-full inline-block" style={{ background: tx.wallet.color }} />
-                          <span style={{ color: "#CBD5E1" }}>{tx.wallet.name}</span>
-                        </span>
-                      ) : (
-                        <span className="text-xs" style={{ color: "#475569" }}>—</span>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4 text-white">{tx.description || "-"}</td>
-                    <td className="py-3 pr-4 font-semibold text-emerald-400"><MaskedAmount amount={tx.amount} /></td>
-                    <td className="py-3">
-                      <button onClick={() => handleDelete(tx.id)} className="btn-danger p-1.5">
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((tx) => {
+                  const catColor = catMap[tx.category] || CATEGORY_COLORS[tx.category] || "#94A3B8"
+
+                  if (tx.id === editingId) {
+                    return (
+                      <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", background: "rgba(16,185,129,0.06)" }}>
+                        <td className="py-2 pr-2">
+                          <input type="date" className={inputSm} value={editForm.date}
+                            onChange={(e) => setEditForm({ ...editForm, date: e.target.value })} />
+                        </td>
+                        <td className="py-2 pr-2">
+                          <select className={inputSm} value={editForm.category}
+                            onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>
+                            {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="py-2 pr-2">
+                          <select className={inputSm} value={editForm.walletId}
+                            onChange={(e) => setEditForm({ ...editForm, walletId: e.target.value })}>
+                            {wallets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                          </select>
+                        </td>
+                        <td className="py-2 pr-2">
+                          <input type="text" className={inputSm} value={editForm.description}
+                            onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} />
+                        </td>
+                        <td className="py-2 pr-2">
+                          <input type="number" step="0.01" className={inputSm} value={editForm.amount}
+                            onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })} />
+                        </td>
+                        <td className="py-2">
+                          <div className="flex gap-1">
+                            <button onClick={() => handleSaveEdit(tx.id)} disabled={saving}
+                              className="p-1.5 rounded-lg"
+                              style={{ background: "rgba(16,185,129,0.2)", color: "#10B981" }}>
+                              <Check size={14} />
+                            </button>
+                            <button onClick={() => setEditingId(null)}
+                              className="p-1.5 rounded-lg"
+                              style={{ background: "rgba(100,116,139,0.2)", color: "#94A3B8" }}>
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  }
+
+                  return (
+                    <tr key={tx.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+                      className="hover:bg-white/5 transition-colors">
+                      <td className="py-3 pr-4" style={{ color: "#94A3B8" }}>{formatDate(tx.date)}</td>
+                      <td className="py-3 pr-4">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={{ background: `${catColor}20`, color: catColor }}>{tx.category}</span>
+                      </td>
+                      <td className="py-3 pr-4">
+                        {tx.wallet ? (
+                          <span className="flex items-center gap-1.5 text-xs">
+                            <span className="w-2 h-2 rounded-full inline-block" style={{ background: tx.wallet.color }} />
+                            <span style={{ color: "#CBD5E1" }}>{tx.wallet.name}</span>
+                          </span>
+                        ) : <span className="text-xs" style={{ color: "#475569" }}>—</span>}
+                      </td>
+                      <td className="py-3 pr-4 text-white">{tx.description || "-"}</td>
+                      <td className="py-3 pr-4 font-semibold text-emerald-400"><MaskedAmount amount={tx.amount} /></td>
+                      <td className="py-3">
+                        <div className="flex gap-1">
+                          <button onClick={() => startEdit(tx)}
+                            className="btn-ghost p-1.5" title="Editar">
+                            <Pencil size={14} style={{ color: "#64748B" }} />
+                          </button>
+                          <button onClick={() => handleDelete(tx.id)} className="btn-danger p-1.5" title="Eliminar">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

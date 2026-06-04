@@ -1,233 +1,637 @@
 "use client"
 
-import { useState } from "react"
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts"
-import { BarChart3, Flame, DollarSign } from "lucide-react"
-import { formatCurrency, formatPercent, BUDGET_METHODS, calculateFIRENumber, calculateYearsToFIRE } from "@/lib/utils"
+import { useEffect, useRef, useState } from "react"
+import {
+  BarChart3, Flame, Save, CheckCircle2, AlertTriangle,
+  Home, Sparkles, PiggyBank, TrendingUp, Info,
+  ShieldCheck, Zap, Globe, DollarSign,
+} from "lucide-react"
+import { formatCurrency, calculateFIRENumber, calculateYearsToFIRE, formatPercent } from "@/lib/utils"
+import MaskedAmount from "@/components/ui/MaskedAmount"
 
-type MethodKey = keyof typeof BUDGET_METHODS
+/* ─── Types ─── */
+interface BudgetRule { needsPct: number; wantsPct: number; savingsPct: number }
+interface CatRow {
+  id: string | null; name: string; macro: string | null; color: string
+  budgetQ1: number; budgetQ2: number
+  actualQ1: number; actualQ2: number
+}
+interface MacroTotals { budgetQ1: number; budgetQ2: number; actualQ1: number; actualQ2: number }
+interface Summary {
+  income: { q1: number; q2: number; monthly: number }
+  categories: CatRow[]
+  byMacro: Record<string, MacroTotals>
+  rule: BudgetRule
+  month: string; monthNum: number; year: number; lastDay: number
+}
 
+/* ─── Constants ─── */
+const MACROS = [
+  { key: "Necesidades",      Icon: Home,      color: "#10B981", label: "Necesidades",      pctKey: "needsPct"   as const },
+  { key: "Deseos",           Icon: Sparkles,  color: "#6366F1", label: "Deseos",           pctKey: "wantsPct"   as const },
+  { key: "Ahorro/Inversión", Icon: PiggyBank, color: "#F59E0B", label: "Ahorro/Inversión", pctKey: "savingsPct" as const },
+]
+
+interface Preset { key: string; label: string; desc: string; Icon: React.ElementType; rule: BudgetRule }
+const PRESETS: Preset[] = [
+  { key: "50-30-20", label: "50/30/20", desc: "La más popular",    Icon: BarChart3,   rule: { needsPct: 50, wantsPct: 30, savingsPct: 20 } },
+  { key: "70-10-20", label: "70/10/20", desc: "Para iniciar",      Icon: ShieldCheck, rule: { needsPct: 70, wantsPct: 10, savingsPct: 20 } },
+  { key: "fire",     label: "FIRE",     desc: "Retiro anticipado", Icon: Zap,         rule: { needsPct: 40, wantsPct: 10, savingsPct: 50 } },
+  { key: "latam",    label: "LATAM",    desc: "Contexto regional", Icon: Globe,       rule: { needsPct: 45, wantsPct: 15, savingsPct: 40 } },
+  { key: "custom",   label: "Custom",   desc: "Define tus %",      Icon: Sparkles,    rule: { needsPct: 0,  wantsPct: 0,  savingsPct: 0  } },
+]
+
+/* ─── Mini stacked bar ─── */
+function RuleBar({ needsPct, wantsPct, savingsPct, height = 6 }: BudgetRule & { height?: number }) {
+  return (
+    <div className="flex rounded-full overflow-hidden" style={{ height, gap: 2 }}>
+      <div style={{ flex: needsPct,   background: "#10B981" }} />
+      <div style={{ flex: wantsPct,   background: "#6366F1" }} />
+      <div style={{ flex: savingsPct, background: "#F59E0B" }} />
+    </div>
+  )
+}
+
+/* ─── Budget input cell ─── */
+function BudgetCell({ cat, half, monthNum, year, onSave }: {
+  cat: CatRow; half: 1 | 2; monthNum: number; year: number
+  onSave: (name: string, half: 1 | 2, amount: number) => void
+}) {
+  const initial  = half === 1 ? cat.budgetQ1 : cat.budgetQ2
+  const [val, setVal] = useState(initial > 0 ? initial.toString() : "")
+  const prev     = useRef(initial)
+
+  const handleBlur = async () => {
+    const amount = parseFloat(val) || 0
+    if (amount === prev.current) return
+    prev.current = amount
+    onSave(cat.name, half, amount)
+    await fetch("/api/budget/categories", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: cat.name, amount, month: monthNum, year, half }),
+    })
+  }
+
+  return (
+    <div className="relative w-20">
+      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: "#475569" }}>$</span>
+      <input type="number" min="0" step="1" placeholder="—"
+        value={val} onChange={(e) => setVal(e.target.value)} onBlur={handleBlur}
+        className="w-full pl-5 pr-1 py-1.5 rounded-lg text-right text-xs"
+        style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "#F1F5F9", outline: "none" }} />
+    </div>
+  )
+}
+
+/* ─── Category row in the table ─── */
+function CategoryTableRow({ cat, monthNum, year, onBudgetSave }: {
+  cat: CatRow; monthNum: number; year: number
+  onBudgetSave: (name: string, half: 1 | 2, amount: number) => void
+}) {
+  const q1Over    = cat.actualQ1 > cat.budgetQ1 && cat.budgetQ1 > 0
+  const q2Over    = cat.actualQ2 > cat.budgetQ2 && cat.budgetQ2 > 0
+  const q1BarPct  = cat.budgetQ1 > 0 ? Math.min((cat.actualQ1 / cat.budgetQ1) * 100, 100) : 0
+  const q2BarPct  = cat.budgetQ2 > 0 ? Math.min((cat.actualQ2 / cat.budgetQ2) * 100, 100) : 0
+
+  return (
+    <div className="border-b last:border-b-0" style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+      <div className="flex items-center gap-2 py-2.5 text-xs">
+        {/* Category name */}
+        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: cat.color }} />
+        <span className="text-sm text-white flex-1 min-w-0 truncate">{cat.name}</span>
+
+        {/* Q1 budget */}
+        <BudgetCell cat={cat} half={1} monthNum={monthNum} year={year} onSave={onBudgetSave} />
+
+        {/* Q1 actual */}
+        <div className="w-20 text-right shrink-0 font-medium" style={{ color: q1Over ? "#EF4444" : "#94A3B8" }}>
+          <MaskedAmount amount={cat.actualQ1} />
+          {q1Over && <AlertTriangle size={10} className="inline ml-1" style={{ color: "#EF4444" }} />}
+        </div>
+
+        {/* Divider */}
+        <div className="w-px h-6 shrink-0" style={{ background: "rgba(255,255,255,0.08)" }} />
+
+        {/* Q2 budget */}
+        <BudgetCell cat={cat} half={2} monthNum={monthNum} year={year} onSave={onBudgetSave} />
+
+        {/* Q2 actual */}
+        <div className="w-20 text-right shrink-0 font-medium" style={{ color: q2Over ? "#EF4444" : "#94A3B8" }}>
+          <MaskedAmount amount={cat.actualQ2} />
+          {q2Over && <AlertTriangle size={10} className="inline ml-1" style={{ color: "#EF4444" }} />}
+        </div>
+      </div>
+
+      {/* Progress bars */}
+      {(cat.budgetQ1 > 0 || cat.budgetQ2 > 0) && (
+        <div className="ml-4 mb-2 grid grid-cols-2 gap-1 pr-2" style={{ columnGap: "calc(20px + 80px + 1px)" }}>
+          <div className="h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+            {cat.budgetQ1 > 0 && (
+              <div className="h-full rounded-full" style={{ width: `${q1BarPct}%`, background: q1Over ? "#EF4444" : cat.color }} />
+            )}
+          </div>
+          <div className="h-0.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+            {cat.budgetQ2 > 0 && (
+              <div className="h-full rounded-full" style={{ width: `${q2BarPct}%`, background: q2Over ? "#EF4444" : cat.color }} />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Macro section ─── */
+function MacroSection({ macro, cats, totals, monthNum, year, onBudgetSave }: {
+  macro: typeof MACROS[0]; cats: CatRow[]
+  totals: MacroTotals; monthNum: number; year: number
+  onBudgetSave: (name: string, half: 1 | 2, amount: number) => void
+}) {
+  const q1Over = totals.actualQ1 > totals.budgetQ1 && totals.budgetQ1 > 0
+  const q2Over = totals.actualQ2 > totals.budgetQ2 && totals.budgetQ2 > 0
+
+  return (
+    <div className="glass-card rounded-2xl overflow-hidden">
+      <div className="h-1" style={{ background: macro.color }} />
+      <div className="p-5">
+
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${macro.color}18` }}>
+              <macro.Icon size={16} style={{ color: macro.color }} />
+            </div>
+            <p className="font-semibold text-white text-sm">{macro.label}</p>
+          </div>
+          {/* Q1 / Q2 summary */}
+          <div className="flex gap-4 text-xs">
+            <div className="text-right">
+              <p className="text-xs mb-0.5" style={{ color: "#475569" }}>Q1 pres. / real</p>
+              <p style={{ color: q1Over ? "#EF4444" : macro.color }} className="font-semibold">
+                <MaskedAmount amount={totals.budgetQ1} /> / <MaskedAmount amount={totals.actualQ1} />
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs mb-0.5" style={{ color: "#475569" }}>Q2 pres. / real</p>
+              <p style={{ color: q2Over ? "#EF4444" : macro.color }} className="font-semibold">
+                <MaskedAmount amount={totals.budgetQ2} /> / <MaskedAmount amount={totals.actualQ2} />
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bars for macro totals */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {[
+            { label: "Q1 · 1–15",   budget: totals.budgetQ1, actual: totals.actualQ1, over: q1Over },
+            { label: "Q2 · 16–fin", budget: totals.budgetQ2, actual: totals.actualQ2, over: q2Over },
+          ].map(({ label, budget, actual, over }) => {
+            const pct = budget > 0 ? Math.min((actual / budget) * 100, 100) : 0
+            return (
+              <div key={label} className="rounded-xl p-3"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div className="flex justify-between text-xs mb-2">
+                  <span style={{ color: "#64748B" }}>{label}</span>
+                  <span style={{ color: over ? "#EF4444" : "#94A3B8" }}>
+                    {budget > 0 ? `${Math.round(pct)}%` : "—"}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{ width: budget > 0 ? `${pct}%` : "0%", background: over ? "#EF4444" : macro.color }} />
+                </div>
+                <div className="flex justify-between text-xs mt-1.5">
+                  <span style={{ color: "#475569" }}>Pres: <MaskedAmount amount={budget} /></span>
+                  <span style={{ color: over ? "#EF4444" : "#94A3B8" }}>Real: <MaskedAmount amount={actual} /></span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Table header */}
+        <div className="flex items-center gap-2 pb-2 border-b" style={{ borderColor: "rgba(255,255,255,0.06)" }}>
+          <div className="w-2 shrink-0" />
+          <span className="flex-1 text-xs" style={{ color: "#475569" }}>Categoría</span>
+          <span className="w-20 text-right text-xs shrink-0" style={{ color: "#64748B" }}>Pres. Q1</span>
+          <span className="w-20 text-right text-xs shrink-0" style={{ color: "#64748B" }}>Real Q1</span>
+          <div className="w-px shrink-0" />
+          <span className="w-20 text-right text-xs shrink-0" style={{ color: "#6366F1" }}>Pres. Q2</span>
+          <span className="w-20 text-right text-xs shrink-0" style={{ color: "#6366F1" }}>Real Q2</span>
+        </div>
+
+        {cats.length > 0 ? cats.map((c) => (
+          <CategoryTableRow key={c.name} cat={c} monthNum={monthNum} year={year} onBudgetSave={onBudgetSave} />
+        )) : (
+          <p className="text-xs py-4 text-center" style={{ color: "#475569" }}>Sin categorías en este grupo.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Unclassified ─── */
+function UnclassifiedSection({ cats, monthNum, year, onAssign, onBudgetSave }: {
+  cats: CatRow[]; monthNum: number; year: number
+  onAssign: (id: string, name: string, macro: string) => void
+  onBudgetSave: (name: string, half: 1 | 2, amount: number) => void
+}) {
+  if (cats.length === 0) return null
+  return (
+    <div className="glass-card rounded-2xl overflow-hidden">
+      <div className="h-1" style={{ background: "#475569" }} />
+      <div className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "rgba(100,116,139,0.15)" }}>
+            <Info size={15} style={{ color: "#64748B" }} />
+          </div>
+          <div>
+            <p className="font-semibold text-white text-sm">Sin clasificar</p>
+            <p className="text-xs" style={{ color: "#475569" }}>Asigna el grupo de cada categoría para incluirla en el desglose</p>
+          </div>
+        </div>
+        {cats.map((c) => (
+          <div key={c.name} className="flex items-center gap-2 py-2.5 border-b last:border-b-0 text-xs"
+            style={{ borderColor: "rgba(255,255,255,0.04)" }}>
+            <div className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+            <span className="text-sm text-white flex-1 min-w-0 truncate">{c.name}</span>
+            <select defaultValue=""
+              onChange={async (e) => {
+                const macro = e.target.value
+                if (!macro || !c.id) return
+                await fetch(`/api/categories/${c.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ macro }),
+                })
+                onAssign(c.id, c.name, macro)
+              }}
+              className="w-32 text-xs rounded-lg px-2 py-1.5 shrink-0"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "#94A3B8", outline: "none" }}>
+              <option value="" disabled>Asignar...</option>
+              <option value="Necesidades">Necesidades</option>
+              <option value="Deseos">Deseos</option>
+              <option value="Ahorro/Inversión">Ahorro/Inversión</option>
+            </select>
+            <BudgetCell cat={c} half={1} monthNum={monthNum} year={year} onSave={onBudgetSave} />
+            <div className="w-16 text-right" style={{ color: "#94A3B8" }}><MaskedAmount amount={c.actualQ1} /></div>
+            <div className="w-px h-5 shrink-0" style={{ background: "rgba(255,255,255,0.08)" }} />
+            <BudgetCell cat={c} half={2} monthNum={monthNum} year={year} onSave={onBudgetSave} />
+            <div className="w-16 text-right" style={{ color: "#94A3B8" }}><MaskedAmount amount={c.actualQ2} /></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ─── Page ─── */
 export default function PresupuestoPage() {
-  const [income, setIncome] = useState("")
-  const [method, setMethod] = useState<MethodKey>("50-30-20")
+  const [summary,      setSummary]      = useState<Summary | null>(null)
+  const [loading,      setLoading]      = useState(true)
+  const [cats,         setCats]         = useState<CatRow[]>([])
+  const [activePreset, setActivePreset] = useState("50-30-20")
+  const [customRule,   setCustomRule]   = useState<BudgetRule>({ needsPct: 50, wantsPct: 30, savingsPct: 20 })
+  const [ruleSaving,   setRuleSaving]   = useState(false)
+  const [ruleSaved,    setRuleSaved]    = useState(false)
+  const [expectedSalary, setExpectedSalary] = useState("")
+
+  // FIRE
   const [monthlyExpenses, setMonthlyExpenses] = useState("")
-  const [currentSavings, setCurrentSavings] = useState("")
-  const [monthlySavings, setMonthlySavings] = useState("")
+  const [currentSavings,  setCurrentSavings]  = useState("")
+  const [monthlySavings,  setMonthlySavings]  = useState("")
 
-  const incomeNum = parseFloat(income) || 0
+  useEffect(() => {
+    const saved = localStorage.getItem("expectedSalary")
+    if (saved) setExpectedSalary(saved)
+
+    Promise.all([
+      fetch("/api/budget/summary").then((r) => r.json()),
+      fetch("/api/budget-rule").then((r) => r.json()),
+    ]).then(([s, r]: [Summary, BudgetRule]) => {
+      setSummary(s)
+      setCats(s.categories ?? [])
+      const match = PRESETS.find(
+        (p) => p.key !== "custom" &&
+          p.rule.needsPct === r.needsPct &&
+          p.rule.wantsPct === r.wantsPct &&
+          p.rule.savingsPct === r.savingsPct
+      )
+      if (match) setActivePreset(match.key)
+      else { setActivePreset("custom"); setCustomRule(r) }
+    }).finally(() => setLoading(false))
+  }, [])
+
+  const handleBudgetSave = (name: string, half: 1 | 2, amount: number) =>
+    setCats((prev) => prev.map((c) =>
+      c.name === name ? { ...c, budgetQ1: half === 1 ? amount : c.budgetQ1, budgetQ2: half === 2 ? amount : c.budgetQ2 } : c
+    ))
+
+  const handleAssignMacro = (id: string, name: string, macro: string) =>
+    setCats((prev) => prev.map((c) => c.id === id || c.name === name ? { ...c, macro } : c))
+
+  const currentRule: BudgetRule = activePreset === "custom"
+    ? customRule
+    : PRESETS.find((p) => p.key === activePreset)!.rule
+
+  const customSum = Math.round(customRule.needsPct + customRule.wantsPct + customRule.savingsPct)
+  const canSave   = activePreset !== "custom" || customSum === 100
+
+  const handleSaveRule = async () => {
+    if (!canSave) return
+    setRuleSaving(true)
+    try {
+      await fetch("/api/budget-rule", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(currentRule),
+      })
+      setRuleSaved(true)
+      setTimeout(() => setRuleSaved(false), 2500)
+    } finally { setRuleSaving(false) }
+  }
+
+  // Use expected salary if entered, else real income
+  const salaryNum  = parseFloat(expectedSalary) || 0
+  const income     = salaryNum || (summary?.income.monthly ?? 0)
+  const classified   = cats.filter((c) => c.macro !== null)
+  const unclassified = cats.filter((c) => c.macro === null)
+
+  // Recompute byMacro from local cats (reflects budget saves without refetch)
+  const byMacroLocal: Record<string, MacroTotals> = {}
+  for (const c of cats) {
+    const key = c.macro ?? "Sin clasificar"
+    if (!byMacroLocal[key]) byMacroLocal[key] = { budgetQ1: 0, budgetQ2: 0, actualQ1: 0, actualQ2: 0 }
+    byMacroLocal[key].budgetQ1 += c.budgetQ1
+    byMacroLocal[key].budgetQ2 += c.budgetQ2
+    byMacroLocal[key].actualQ1 += c.actualQ1
+    byMacroLocal[key].actualQ2 += c.actualQ2
+  }
+
   const expensesNum = parseFloat(monthlyExpenses) || 0
-  const savingsNum = parseFloat(currentSavings) || 0
-  const mSavingsNum = parseFloat(monthlySavings) || 0
-
-  const selectedMethod = BUDGET_METHODS[method]
-  const fireNumber = calculateFIRENumber(expensesNum)
+  const savingsNum  = parseFloat(currentSavings)  || 0
+  const mSavingsNum = parseFloat(monthlySavings)   || 0
+  const fireNumber  = calculateFIRENumber(expensesNum)
   const yearsToFire = calculateYearsToFIRE(savingsNum, mSavingsNum, expensesNum)
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-8">
+    <div className="p-6 max-w-5xl mx-auto space-y-6">
+
+      {/* Header */}
+      <div>
         <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <BarChart3 style={{ color: "#F59E0B" }} /> Recomendación de Presupuesto
+          <BarChart3 style={{ color: "#F59E0B" }} /> Presupuesto Vivo
         </h1>
-        <p style={{ color: "#64748B" }} className="mt-1">Elige el método y obtén tu plan personalizado</p>
+        <p className="mt-1 text-sm" style={{ color: "#64748B" }}>
+          Define cuánto esperas gastar en cada quincena y compara con lo real
+        </p>
       </div>
 
-      {/* Income Input */}
-      <div className="glass-card rounded-2xl p-6 mb-8">
-        <label className="text-sm font-semibold text-white block mb-3">Tu ingreso mensual neto</label>
-        <div className="flex gap-4 flex-wrap">
-          <div className="relative flex-1 min-w-52">
-            <DollarSign size={16} className="absolute left-3 top-3" style={{ color: "#10B981" }} />
-            <input
-              type="number" step="0.01" min="0"
-              className="input-dark pl-8"
-              placeholder="Ej: 15000"
-              value={income}
-              onChange={(e) => setIncome(e.target.value)}
-            />
+      {/* Expected salary + real income */}
+      <div className="glass-card rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <DollarSign size={15} style={{ color: "#10B981" }} />
+          <h2 className="text-sm font-semibold text-white">Ingreso de referencia</h2>
+        </div>
+        <div className="grid md:grid-cols-3 gap-4 items-end">
+          <div>
+            <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
+              Salario mensual esperado
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-2.5 text-sm" style={{ color: "#475569" }}>$</span>
+              <input type="number" min="0" step="100" placeholder="Ej: 20000"
+                className="input-dark pl-7"
+                value={expectedSalary}
+                onChange={(e) => {
+                  setExpectedSalary(e.target.value)
+                  localStorage.setItem("expectedSalary", e.target.value)
+                }} />
+            </div>
+            <p className="text-xs mt-1" style={{ color: "#475569" }}>
+              Usado para calcular los objetivos de cada grupo
+            </p>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.15)" }}>
+            <p className="text-xs mb-1" style={{ color: "#64748B" }}>Ingresos reales este mes</p>
+            <p className="text-xl font-bold text-emerald-400"><MaskedAmount amount={summary?.income.monthly ?? 0} /></p>
+            <p className="text-xs mt-0.5" style={{ color: "#475569" }}>
+              Q1: <MaskedAmount amount={summary?.income.q1 ?? 0} /> · Q2: <MaskedAmount amount={summary?.income.q2 ?? 0} />
+            </p>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.15)" }}>
+            <p className="text-xs mb-1" style={{ color: "#64748B" }}>Referencia activa</p>
+            <p className="text-xl font-bold" style={{ color: "#F59E0B" }}>
+              <MaskedAmount amount={income} />
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: "#475569" }}>
+              {salaryNum > 0 ? "Salario esperado ingresado" : "Ingresos reales del mes"}
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Method Selector */}
-      <div className="glass-card rounded-2xl p-6 mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Selecciona tu método</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          {(Object.keys(BUDGET_METHODS) as MethodKey[]).map((key) => (
-            <button
-              key={key}
-              onClick={() => setMethod(key)}
-              className="p-4 rounded-xl text-left transition-all"
-              style={{
-                background: method === key ? "rgba(245,158,11,0.15)" : "var(--bg-hover)",
-                border: method === key ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <div className="text-xs font-bold mb-1" style={{ color: method === key ? "#F59E0B" : "#94A3B8" }}>
-                {BUDGET_METHODS[key].name}
-              </div>
-              <div className="text-xs leading-relaxed line-clamp-2" style={{ color: "#64748B" }}>
-                {BUDGET_METHODS[key].categories.map((c) => `${c.percent}%`).join(" · ")}
-              </div>
-            </button>
-          ))}
+      {/* Distribution rule */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <BarChart3 size={15} style={{ color: "#F59E0B" }} />
+          <h2 className="text-sm font-semibold text-white">Regla de distribución</h2>
+          <span className="text-xs ml-1" style={{ color: "#475569" }}>— define % por grupo</span>
         </div>
 
-        {/* Method description */}
-        <div className="p-4 rounded-xl mb-6" style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)" }}>
-          <div className="font-semibold text-white mb-1">{selectedMethod.name}</div>
-          <p className="text-sm" style={{ color: "#94A3B8" }}>{selectedMethod.description}</p>
+        {/* Preset tabs */}
+        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
+          {PRESETS.map((p) => {
+            const active = activePreset === p.key
+            return (
+              <button key={p.key} onClick={() => setActivePreset(p.key)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl whitespace-nowrap transition-all shrink-0"
+                style={{
+                  background: active ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.04)",
+                  border: `1px solid ${active ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}`,
+                }}>
+                <p.Icon size={12} style={{ color: active ? "#F59E0B" : "#64748B" }} />
+                <span className="text-xs font-semibold" style={{ color: active ? "#F59E0B" : "#94A3B8" }}>{p.label}</span>
+                {p.key !== "custom" && (
+                  <span className="text-xs" style={{ color: active ? "rgba(245,158,11,0.7)" : "#475569" }}>{p.desc}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
 
-        {/* Budget Breakdown */}
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Cards */}
-          <div className="space-y-3">
-            {selectedMethod.categories.map((cat) => {
-              const amount = incomeNum * (cat.percent / 100)
+        {/* Rule detail */}
+        <div className="rounded-2xl p-4 space-y-3"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <RuleBar {...currentRule} height={10} />
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { Icon: Home,      label: "Necesidades", key: "needsPct"   as const, color: "#10B981" },
+              { Icon: Sparkles,  label: "Deseos",      key: "wantsPct"   as const, color: "#6366F1" },
+              { Icon: PiggyBank, label: "Ahorro",      key: "savingsPct" as const, color: "#F59E0B" },
+            ].map(({ Icon, label, key, color }) => {
+              const pct = currentRule[key]
+              const amt = income * pct / 100
               return (
-                <div key={cat.name} className="p-4 rounded-xl" style={{ background: "var(--bg-hover)", border: `1px solid ${cat.color}20` }}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{cat.icon}</span>
-                      <div>
-                        <div className="font-semibold text-white text-sm">{cat.name}</div>
-                        <div className="text-xs" style={{ color: "#64748B" }}>{cat.examples}</div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-lg font-bold" style={{ color: cat.color }}>
-                        {cat.percent}%
-                      </div>
-                      {incomeNum > 0 && (
-                        <div className="text-sm font-medium text-white">{formatCurrency(amount)}</div>
-                      )}
-                    </div>
+                <div key={key} className="rounded-xl p-3"
+                  style={{ background: `${color}0D`, border: `1px solid ${color}22` }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <Icon size={12} style={{ color }} />
+                    <span className="text-xs" style={{ color: "#94A3B8" }}>{label}</span>
                   </div>
-                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${cat.percent}%`, background: cat.color }} />
-                  </div>
+                  {activePreset === "custom" ? (
+                    <div className="flex items-baseline gap-0.5">
+                      <input type="number" min="0" max="100" step="1"
+                        className="w-12 bg-transparent text-xl font-bold outline-none"
+                        style={{ color }}
+                        value={customRule[key]}
+                        onChange={(e) => setCustomRule((r) => ({ ...r, [key]: parseFloat(e.target.value) || 0 }))} />
+                      <span className="text-sm font-bold" style={{ color }}>%</span>
+                    </div>
+                  ) : (
+                    <p className="text-xl font-bold" style={{ color }}>{pct}%</p>
+                  )}
+                  <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
+                    {income > 0 ? formatCurrency(amt) : "—"}
+                  </p>
                 </div>
               )
             })}
           </div>
+          {activePreset === "custom" && (
+            <p className="text-xs" style={{ color: customSum === 100 ? "#10B981" : "#EF4444" }}>
+              {customSum === 100 ? "Suma correcta: 100%" : `Suma: ${customSum}% — debe ser 100%`}
+            </p>
+          )}
+        </div>
 
-          {/* Pie Chart */}
-          <div className="flex flex-col items-center justify-center">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={selectedMethod.categories}
-                  cx="50%" cy="50%"
-                  innerRadius={65} outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="percent"
-                  nameKey="name"
-                >
-                  {selectedMethod.categories.map((entry, i) => (
-                    <Cell key={i} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(v) => `${v}%`} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 mt-2">
-              {selectedMethod.categories.map((cat) => (
-                <div key={cat.name} className="flex items-center gap-2 text-xs">
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: cat.color }} />
-                  <span style={{ color: "#94A3B8" }}>{cat.name} ({cat.percent}%)</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleSaveRule} disabled={ruleSaving || !canSave}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
+            style={{
+              background: "rgba(245,158,11,0.1)",
+              border: "1px solid rgba(245,158,11,0.25)",
+              color: canSave ? "#F59E0B" : "#475569",
+              cursor: canSave ? "pointer" : "not-allowed",
+            }}>
+            <Save size={13} />{ruleSaving ? "Guardando..." : "Guardar regla"}
+          </button>
+          {ruleSaved && (
+            <span className="flex items-center gap-1 text-xs" style={{ color: "#10B981" }}>
+              <CheckCircle2 size={13} /> Guardado
+            </span>
+          )}
         </div>
       </div>
 
+      {/* Category breakdown */}
+      {loading ? (
+        <div className="glass-card rounded-2xl p-16 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+        </div>
+      ) : summary ? (
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-white mb-0.5">
+              Desglose por categoría · {summary.month}
+            </p>
+            <p className="text-xs" style={{ color: "#475569" }}>
+              Pon cuánto esperas gastar en Q1 (1–15) y Q2 (16–{summary.lastDay}) por categoría — se guarda al salir del campo
+            </p>
+          </div>
+
+          {MACROS.map((macro) => {
+            const macroTotals = byMacroLocal[macro.key] ?? { budgetQ1: 0, budgetQ2: 0, actualQ1: 0, actualQ2: 0 }
+            return (
+              <MacroSection
+                key={macro.key}
+                macro={macro}
+                cats={classified.filter((c) => c.macro === macro.key)}
+                totals={macroTotals}
+                monthNum={summary.monthNum}
+                year={summary.year}
+                onBudgetSave={handleBudgetSave}
+              />
+            )
+          })}
+
+          <UnclassifiedSection
+            cats={unclassified}
+            monthNum={summary.monthNum}
+            year={summary.year}
+            onAssign={handleAssignMacro}
+            onBudgetSave={handleBudgetSave}
+          />
+        </div>
+      ) : null}
+
       {/* FIRE Calculator */}
-      <div className="glass-card rounded-2xl p-6">
-        <div className="flex items-center gap-2 mb-6">
-          <Flame size={20} style={{ color: "#EF4444" }} />
-          <h2 className="text-lg font-semibold text-white">Calculadora FIRE</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-            style={{ background: "rgba(239,68,68,0.15)", color: "#F87171" }}>
+      <div className="glass-card rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-5">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(239,68,68,0.12)" }}>
+            <Flame size={14} style={{ color: "#EF4444" }} />
+          </div>
+          <h2 className="text-sm font-semibold text-white">Calculadora FIRE</h2>
+          <span className="text-xs px-2 py-0.5 rounded-full ml-1"
+            style={{ background: "rgba(239,68,68,0.1)", color: "#F87171" }}>
             Financial Independence
           </span>
         </div>
-
-        <div className="grid lg:grid-cols-3 gap-4 mb-6">
-          <div>
-            <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
-              Gastos mensuales actuales
-            </label>
-            <input type="number" className="input-dark" placeholder="Ej: 8000"
-              value={monthlyExpenses} onChange={(e) => setMonthlyExpenses(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
-              Ahorros / inversiones actuales
-            </label>
-            <input type="number" className="input-dark" placeholder="Ej: 50000"
-              value={currentSavings} onChange={(e) => setCurrentSavings(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>
-              Ahorro mensual actual
-            </label>
-            <input type="number" className="input-dark" placeholder="Ej: 3000"
-              value={monthlySavings} onChange={(e) => setMonthlySavings(e.target.value)} />
-          </div>
+        <div className="grid lg:grid-cols-3 gap-4 mb-5">
+          {[
+            { label: "Gastos mensuales",          val: monthlyExpenses, set: setMonthlyExpenses, ph: "2000"  },
+            { label: "Ahorros / inversiones hoy", val: currentSavings,  set: setCurrentSavings,  ph: "10000" },
+            { label: "Ahorro mensual",             val: monthlySavings,  set: setMonthlySavings,  ph: "500"   },
+          ].map(({ label, val, set, ph }) => (
+            <div key={label}>
+              <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>{label}</label>
+              <input type="number" className="input-dark" placeholder={`Ej: ${ph}`}
+                value={val} onChange={(e) => set(e.target.value)} />
+            </div>
+          ))}
         </div>
-
-        {expensesNum > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
-              <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Número FIRE</div>
-              <div className="text-2xl font-bold text-white">{formatCurrency(fireNumber)}</div>
-              <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>25× tus gastos anuales</div>
-            </div>
-            <div className="p-5 rounded-xl" style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}>
-              <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Gastos anuales</div>
-              <div className="text-2xl font-bold text-white">{formatCurrency(expensesNum * 12)}</div>
-              <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Para mantener tu estilo de vida</div>
-            </div>
+        {expensesNum > 0 ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { label: "Número FIRE",    value: formatCurrency(fireNumber),     color: "#EF4444" },
+              { label: "Gastos anuales", value: formatCurrency(expensesNum*12), color: "#F59E0B" },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="p-4 rounded-xl" style={{ background: `${color}0D`, border: `1px solid ${color}20` }}>
+                <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: "#64748B" }}>{label}</p>
+                <p className="text-xl font-bold text-white">{value}</p>
+              </div>
+            ))}
             {savingsNum > 0 && (
-              <div className="p-5 rounded-xl" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)" }}>
-                <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Progreso FIRE</div>
-                <div className="text-2xl font-bold text-white">
-                  {formatPercent((savingsNum / fireNumber) * 100)}
-                </div>
-                <div className="mt-2 h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div className="h-full rounded-full" style={{
-                    width: `${Math.min(100, (savingsNum / fireNumber) * 100)}%`,
-                    background: "linear-gradient(90deg, #4F46E5, #6366F1)"
-                  }} />
+              <div className="p-4 rounded-xl" style={{ background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.15)" }}>
+                <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: "#64748B" }}>Progreso FIRE</p>
+                <p className="text-xl font-bold text-white">{formatPercent((savingsNum / fireNumber) * 100)}</p>
+                <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                  <div className="h-full rounded-full" style={{ width: `${Math.min(100,(savingsNum/fireNumber)*100)}%`, background: "#6366F1" }} />
                 </div>
               </div>
             )}
             {mSavingsNum > 0 && (
-              <div className="p-5 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)" }}>
-                <div className="text-xs uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Años para FIRE</div>
-                <div className="text-2xl font-bold text-emerald-400">
-                  {yearsToFire > 100 ? "100+" : yearsToFire}
-                </div>
-                <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Con 7% de retorno anual</div>
+              <div className="p-4 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.15)" }}>
+                <p className="text-xs uppercase tracking-wider mb-1.5" style={{ color: "#64748B" }}>Años para FIRE</p>
+                <p className="text-xl font-bold text-emerald-400">{yearsToFire > 100 ? "100+" : yearsToFire}</p>
               </div>
             )}
           </div>
+        ) : (
+          <p className="text-sm text-center py-4" style={{ color: "#475569" }}>
+            Ingresa tus gastos mensuales para calcular
+          </p>
         )}
-
-        {expensesNum === 0 && (
-          <div className="text-center py-6" style={{ color: "#475569" }}>
-            Ingresa tus gastos mensuales para calcular tu número FIRE
-          </div>
-        )}
-
-        <div className="mt-6 p-4 rounded-xl text-sm" style={{ background: "var(--bg-hover)", color: "#94A3B8" }}>
-          <strong className="text-white">¿Qué es el Número FIRE?</strong> Es la cantidad que necesitas tener invertida
-          para vivir de las ganancias sin trabajar. Se calcula como 25 veces tus gastos anuales, basado en la
-          <em> Regla del 4%</em>: puedes retirar el 4% de tu portafolio anualmente de forma sustentable.
+        <div className="mt-4 flex items-start gap-2 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }}>
+          <Info size={13} className="mt-0.5 shrink-0" style={{ color: "#475569" }} />
+          <p className="text-xs" style={{ color: "#64748B" }}>
+            <strong className="text-white">Regla del 4%:</strong> Tu Número FIRE es 25× tus gastos anuales.
+            Si retiras el 4% anual, el portafolio dura indefinidamente.
+          </p>
         </div>
       </div>
+
     </div>
   )
 }
