@@ -11,8 +11,12 @@ const geistSans = Geist({
 
 export const metadata: Metadata = {
   title: "FinanzasControl – Tu Libertad Financiera",
-  description:
-    "Controla tus ingresos, gastos y ahorros. Planifica tu camino hacia la libertad financiera.",
+  description: "Controla tus ingresos, gastos y ahorros. Planifica tu camino hacia la libertad financiera.",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 }
 
 export default function RootLayout({
