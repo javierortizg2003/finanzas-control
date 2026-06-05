@@ -56,9 +56,13 @@ export async function POST(
     walletId,
   }
 
+  const INVESTMENT_TYPES = new Set(["CETES / Bonos", "Inversiones", "Crypto", "Afore / Pensión", "Bienes Raíces", "Otros"])
+  const txCategory = INVESTMENT_TYPES.has(saving.type) ? "Inversiones" : "Ahorros"
+
   if (walletId) {
-    // deposit: money leaves wallet (-amount). withdrawal: money enters wallet (+|amount|)
-    // In both cases: wallet.balance += -amount  (deposit: -1000, withdrawal: -(-500)=+500)
+    const txDate = new Date(body.date)
+    // deposit: money leaves wallet. withdrawal: money returns to wallet.
+    const isDeposit = amount > 0
     const [deposit] = await prisma.$transaction([
       prisma.savingDeposit.create({
         data: depositData,
@@ -67,6 +71,18 @@ export async function POST(
       prisma.wallet.update({
         where: { id: walletId },
         data: { balance: { increment: -amount } },
+      }),
+      // Record movement so it appears in transactions
+      prisma.transaction.create({
+        data: {
+          userId,
+          type: isDeposit ? "expense" : "income",
+          amount: Math.abs(amount),
+          category: txCategory,
+          description: `${isDeposit ? "Depósito" : "Retiro"}: ${saving.name}`,
+          date: txDate,
+          walletId,
+        },
       }),
     ])
     return NextResponse.json(deposit, { status: 201 })

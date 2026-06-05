@@ -1,8 +1,9 @@
-export function formatCurrency(amount: number, currency = "MXN"): string {
+export function formatCurrency(amount: number, currency = "MXN", decimals = 2): string {
   return new Intl.NumberFormat("es-MX", {
     style: "currency",
     currency,
-    minimumFractionDigits: 2,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   }).format(amount)
 }
 
@@ -157,6 +158,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Salario: "#10B981",
   Freelance: "#6366F1",
   Inversiones: "#F59E0B",
+  Ahorros: "#6366F1",
   Negocio: "#EC4899",
   Renta: "#14B8A6",
   Bonos: "#8B5CF6",

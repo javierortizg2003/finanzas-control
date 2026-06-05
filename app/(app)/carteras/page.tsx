@@ -208,7 +208,7 @@ export default function CarterasPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
           <div>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Patrimonio neto</div>
-            <div className="text-3xl font-bold text-emerald-400"><MaskedAmount amount={totalBalance - totalCredit} /></div>
+            <div className="text-3xl font-bold text-emerald-400"><MaskedAmount amount={totalBalance + totalCredit} /></div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Activos - Deudas</div>
           </div>
           <div>
@@ -218,7 +218,7 @@ export default function CarterasPage() {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Deuda en crédito</div>
-            <div className="text-2xl font-bold text-red-400"><MaskedAmount amount={totalCredit} /></div>
+            <div className="text-2xl font-bold text-red-400"><MaskedAmount amount={Math.abs(totalCredit)} /></div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{wallets.filter(w => w.type === "CREDIT_CARD").length} tarjetas</div>
           </div>
         </div>
@@ -467,7 +467,9 @@ export default function CarterasPage() {
                       <MaskedAmount amount={wallet.balance} currency={wallet.currency} />
                     </div>
                     {wallet.type === "CREDIT_CARD" && wallet.creditLimit ? (() => {
-                      const pct = Math.min(100, (wallet.balance / wallet.creditLimit) * 100)
+                      const used = Math.abs(wallet.balance)
+                      const pct = Math.min(100, (used / wallet.creditLimit) * 100)
+                      const available = wallet.creditLimit - used
                       const barColor = pct >= 90 ? "#EF4444" : pct >= 70 ? "#F97316" : "#3B82F6"
                       return (
                         <div className="mt-2 mb-1">
@@ -480,7 +482,7 @@ export default function CarterasPage() {
                               style={{ width: `${pct}%`, background: barColor }} />
                           </div>
                           <div className="text-xs mt-1" style={{ color: "#64748B" }}>
-                            Disponible: <MaskedAmount amount={wallet.creditLimit - wallet.balance} currency={wallet.currency} />
+                            Disponible: <MaskedAmount amount={available} currency={wallet.currency} />
                           </div>
                         </div>
                       )

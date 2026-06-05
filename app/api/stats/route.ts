@@ -2,6 +2,9 @@ import { NextResponse } from "next/server"
 import { auth } from "@clerk/nextjs/server"
 import { prisma } from "@/lib/prisma"
 import { calculateHealthScore, calculateSavingCurrentValue, CATEGORY_COLORS } from "@/lib/utils"
+import { getExchangeRates } from "@/lib/exchangeRates"
+
+const INVESTMENT_TYPES = new Set(["CETES / Bonos", "Inversiones", "Crypto", "Afore / Pensión", "Bienes Raíces", "Otros"])
 
 // Converts `amount` from `fromCurrency` to `baseCurrency` using the rateMap.
 // Tries both the direct rate (from→base) and the inverse (base→from).
@@ -28,56 +31,77 @@ export async function GET() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
   const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
 
-  const [allTransactions, savings, goals, wallets, pref, exchangeRates] = await Promise.all([
-    prisma.transaction.findMany({ where: { userId }, orderBy: { date: "desc" } }),
+  const [allTransactions, savings, goals, wallets, debts, assets, pref, rateMap] = await Promise.all([
+    prisma.transaction.findMany({ where: { userId }, orderBy: { date: "desc" }, include: { wallet: true } }),
     prisma.saving.findMany({ where: { userId }, include: { deposits: true } }),
     prisma.goal.findMany({ where: { userId } }),
     prisma.wallet.findMany({ where: { userId } }),
+    prisma.debt.findMany({ where: { userId } }),
+    prisma.asset.findMany({ where: { userId } }),
     prisma.userPreference.findUnique({ where: { userId } }),
-    prisma.exchangeRate.findMany(),
+    getExchangeRates(),
   ])
 
   const baseCurrency = pref?.baseCurrency ?? "MXN"
 
-  // Build O(1) lookup: "USD→MXN" → 17.35
-  const rateMap = new Map<string, number>()
-  for (const r of exchangeRates) {
-    rateMap.set(`${r.fromCurrency}→${r.toCurrency}`, r.rate)
+  // Converts a transaction amount to baseCurrency.
+  // Uses the linked wallet's currency if available, otherwise assumes MXN.
+  const txToBase = (amount: number, walletCurrency?: string | null) => {
+    const from = walletCurrency ?? "MXN"
+    return toBaseCurrency(amount, from, baseCurrency, rateMap) ?? amount
   }
 
   // ── Monthly income & expenses ────────────────────────────────────────────
   const monthlyTx = allTransactions.filter(t => t.date >= startOfMonth && t.date <= endOfMonth)
-  const monthlyIncome   = monthlyTx.filter(t => t.type === "income").reduce((s, t)  => s + t.amount, 0)
-  const monthlyExpenses = monthlyTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0)
+  const monthlyIncome   = monthlyTx.filter(t => t.type === "income").reduce((s, t) => s + txToBase(t.amount, t.wallet?.currency), 0)
+  const monthlyExpenses = monthlyTx.filter(t => t.type === "expense").reduce((s, t) => s + txToBase(t.amount, t.wallet?.currency), 0)
 
-  // ── Savings (with compound interest) ────────────────────────────────────
-  const totalSavings = savings.reduce(
-    (s, sv) => s + calculateSavingCurrentValue(
+  // ── Savings & investments — split by type, convert using each saving's currency ─
+  const calcValue = (sv: typeof savings[number]) =>
+    calculateSavingCurrentValue(
       sv.deposits.map(d => ({ amount: d.amount, date: d.date.toISOString() })),
       sv.interestRate
-    ),
-    0
-  )
+    )
 
-  // ── Wallet total — BUG #1 FIX: "CREDIT_CARD" (not "credit") ─────────────
-  // BUG #2 FIX: convert each wallet to baseCurrency before summing
+  let totalSavings = 0
+  let totalInvestments = 0
+  for (const sv of savings) {
+    const raw = calcValue(sv)
+    const svCurrency = sv.currency ?? "MXN"
+    const converted = toBaseCurrency(raw, svCurrency, baseCurrency, rateMap) ?? raw
+    if (INVESTMENT_TYPES.has(sv.type)) {
+      totalInvestments += converted
+    } else {
+      totalSavings += converted
+    }
+  }
+
+  // ── Wallet total ─────────────────────────────────────────────────────────
+  // Credit cards have negative balances and are included so they naturally
+  // reduce net worth. Do NOT add them separately to the Debt model.
   let walletTotal = 0
   let unconvertedWalletCount = 0
 
   for (const w of wallets) {
-    if (w.type === "CREDIT_CARD") continue  // credit card debt handled separately
-
     const converted = toBaseCurrency(w.balance, w.currency, baseCurrency, rateMap)
     if (converted !== null) {
       walletTotal += converted
     } else {
       unconvertedWalletCount++
-      // Wallet is in a currency with no known rate — exclude from total
     }
   }
 
-  // ── Net worth (assets only; Debt model handles liabilities) ─────────────
-  const netWorth = totalSavings + walletTotal
+  // ── Debts — no currency field, assume MXN ───────────────────────────────
+  // Math.abs guards against balances entered as negative (they're debts, always positive).
+  const totalDebtMXN = debts.reduce((s, d) => s + Math.abs(d.balance), 0)
+  const totalDebt = toBaseCurrency(totalDebtMXN, "MXN", baseCurrency, rateMap) ?? totalDebtMXN
+
+  // ── Assets — no currency field, assume MXN ──────────────────────────────
+  const totalAssetsMXN = assets.reduce((s, a) => s + a.currentValue, 0)
+  const totalAssets = toBaseCurrency(totalAssetsMXN, "MXN", baseCurrency, rateMap) ?? totalAssetsMXN
+
+  // ── Net worth: activos - pasivos ─────────────────────────────────────────
+  const netWorth = walletTotal + totalSavings + totalInvestments + totalAssets - totalDebt
 
   // ── Health score ─────────────────────────────────────────────────────────
   const avgGoalProgress =
@@ -88,7 +112,7 @@ export async function GET() {
   const healthScore = calculateHealthScore({
     monthlyIncome,
     monthlyExpenses,
-    totalSavings: totalSavings + walletTotal,
+    totalSavings: walletTotal + totalSavings + totalInvestments,
     avgGoalProgress,
   })
 
@@ -136,7 +160,10 @@ export async function GET() {
     monthlyIncome,
     monthlyExpenses,
     totalSavings,
+    totalInvestments,
     walletTotal,
+    totalAssets,
+    totalDebt,
     savingsRate,
     netWorth,
     // Meta

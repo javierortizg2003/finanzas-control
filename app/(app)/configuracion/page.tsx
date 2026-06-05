@@ -1,13 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
-import { Settings, Sun, Moon, DollarSign, Bell, Lock, HelpCircle, Save, CheckCircle2, User } from "lucide-react"
-import ThemeToggle from "@/components/ThemeToggle"
+import { Settings, Sun, Moon, DollarSign, Bell, Lock, HelpCircle, Save, CheckCircle2, User, AlertCircle } from "lucide-react"
+import { usePreferences } from "@/components/providers/PreferencesProvider"
 
 export default function ConfiguracionPage() {
   const { user } = useUser()
+  const router = useRouter()
   const firstName = user?.firstName ?? user?.username ?? "Usuario"
+  const { setDecimalPlaces: setContextDecimalPlaces } = usePreferences()
 
   const [theme,         setTheme]         = useState<"dark" | "light">("dark")
   const [currency,      setCurrency]      = useState("MXN")
@@ -16,26 +19,62 @@ export default function ConfiguracionPage() {
   const [autoSave,      setAutoSave]      = useState(true)
   const [decimalPlaces, setDecimalPlaces] = useState("2")
   const [saved,         setSaved]         = useState(false)
+  const [saving,        setSaving]        = useState(false)
+  const [saveError,     setSaveError]     = useState<string | null>(null)
 
   useEffect(() => {
     const stored = localStorage.getItem("theme") as "dark" | "light" | null
     setTheme(stored ?? "dark")
-    setCurrency(localStorage.getItem("currency") ?? "MXN")
     setNotifications(localStorage.getItem("notifications") !== "false")
     setLanguage(localStorage.getItem("language") ?? "es")
     setAutoSave(localStorage.getItem("autoSave") !== "false")
     setDecimalPlaces(localStorage.getItem("decimalPlaces") ?? "2")
+
+    fetch("/api/preferences")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.baseCurrency) setCurrency(data.baseCurrency)
+      })
+      .catch(() => {
+        setCurrency(localStorage.getItem("currency") ?? "MXN")
+      })
   }, [])
 
-  const handleSave = () => {
-    localStorage.setItem("theme",         theme)
+  const applyTheme = (next: "dark" | "light") => {
+    setTheme(next)
+    document.documentElement.classList.toggle("light", next === "light")
+    localStorage.setItem("theme", next)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const res = await fetch("/api/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseCurrency: currency }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error ?? `Error ${res.status}`)
+      }
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "No se pudo guardar en el servidor")
+      setSaving(false)
+      return
+    }
+    const decimals = parseInt(decimalPlaces)
+    setContextDecimalPlaces(decimals)
     localStorage.setItem("currency",      currency)
     localStorage.setItem("notifications", notifications.toString())
     localStorage.setItem("language",      language)
     localStorage.setItem("autoSave",      autoSave.toString())
     localStorage.setItem("decimalPlaces", decimalPlaces)
-    document.documentElement.classList.toggle("light", theme === "light")
+    setSaving(false)
     setSaved(true)
+    window.dispatchEvent(new Event("preferences-saved"))
+    router.refresh()
     setTimeout(() => setSaved(false), 2500)
   }
 
@@ -86,7 +125,7 @@ export default function ConfiguracionPage() {
               { key: "dark"  as const, label: "Modo Oscuro", Icon: Moon,  accent: "#6366F1" },
               { key: "light" as const, label: "Modo Claro",  Icon: Sun,   accent: "#F59E0B" },
             ]).map(({ key, label, Icon, accent }) => (
-              <button key={key} onClick={() => setTheme(key)}
+              <button key={key} onClick={() => applyTheme(key)}
                 className="flex-1 flex items-center gap-3 p-4 rounded-xl text-left transition-all"
                 style={{
                   background: theme === key ? `${accent}20` : "rgba(255,255,255,0.03)",
@@ -194,24 +233,33 @@ export default function ConfiguracionPage() {
         </div>
 
         {/* Save + Reset */}
-        <div className="flex items-center justify-between pt-2">
-          <button onClick={() => {
-            if (confirm("¿Resetear todas las configuraciones?")) {
-              localStorage.clear()
-              window.location.reload()
-            }
-          }}
-            className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
-            style={{ background: "rgba(239,68,68,0.08)", color: "#F87171", border: "1px solid rgba(239,68,68,0.2)" }}>
-            Resetear
-          </button>
+        <div className="space-y-3 pt-2">
+          {saveError && (
+            <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm"
+              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#F87171" }}>
+              <AlertCircle size={15} className="shrink-0" />
+              {saveError}
+            </div>
+          )}
+          <div className="flex items-center justify-between">
+            <button onClick={() => {
+              if (confirm("¿Resetear todas las configuraciones?")) {
+                localStorage.clear()
+                window.location.reload()
+              }
+            }}
+              className="px-5 py-2.5 rounded-xl text-sm font-medium transition-all"
+              style={{ background: "rgba(239,68,68,0.08)", color: "#F87171", border: "1px solid rgba(239,68,68,0.2)" }}>
+              Resetear
+            </button>
 
-          <button onClick={handleSave}
-            className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all"
-            style={{ background: "linear-gradient(135deg,#059669,#10B981)", color: "white" }}>
-            {saved ? <CheckCircle2 size={16} /> : <Save size={16} />}
-            {saved ? "Guardado" : "Guardar cambios"}
-          </button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60"
+              style={{ background: "linear-gradient(135deg,#059669,#10B981)", color: "white" }}>
+              {saved ? <CheckCircle2 size={16} /> : <Save size={16} />}
+              {saving ? "Guardando…" : saved ? "Guardado" : "Guardar cambios"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 "use client"
 
 import { usePrivacy } from "@/components/providers/PrivacyProvider"
+import { usePreferences } from "@/components/providers/PreferencesProvider"
 import { formatCurrency } from "@/lib/utils"
 
 interface MaskedAmountProps {
@@ -11,6 +12,7 @@ interface MaskedAmountProps {
 
 export default function MaskedAmount({ amount, className, currency }: MaskedAmountProps) {
   const { isPrivate } = usePrivacy()
+  const { decimalPlaces } = usePreferences()
 
   if (isPrivate) {
     return <span className={className}>•••••</span>
@@ -18,7 +20,7 @@ export default function MaskedAmount({ amount, className, currency }: MaskedAmou
 
   return (
     <span className={className}>
-      {formatCurrency(amount, currency)}
+      {formatCurrency(amount, currency, decimalPlaces)}
     </span>
   )
 }

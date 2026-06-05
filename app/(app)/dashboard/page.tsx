@@ -19,6 +19,10 @@ interface Stats {
   monthlyIncome: number
   monthlyExpenses: number
   totalSavings: number
+  totalInvestments: number
+  walletTotal: number
+  totalAssets: number
+  totalDebt: number
   savingsRate: number
   healthScore: number
   monthlyData: { month: string; income: number; expenses: number }[]
@@ -99,7 +103,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await fetch("/api/stats")
+        const res = await fetch("/api/stats", { cache: "no-store" })
         if (res.ok) {
           const data = await res.json()
           setStats(data)
@@ -112,6 +116,11 @@ export default function DashboardPage() {
       }
     }
     fetchStats()
+
+    // Refetch when preferences are saved from another page
+    const onPrefsSaved = () => { setLoading(true); fetchStats() }
+    window.addEventListener("preferences-saved", onPrefsSaved)
+    return () => window.removeEventListener("preferences-saved", onPrefsSaved)
   }, [])
 
   if (loading) {
@@ -141,17 +150,17 @@ export default function DashboardPage() {
       <QuickExpenseForm />
 
       {/* Tarjetas de estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
           label="Ingresos este mes"
-          value={<MaskedAmount amount={stats.monthlyIncome} />}
+          value={<MaskedAmount amount={stats.monthlyIncome} currency={stats.baseCurrency} />}
           icon={TrendingUp}
           color="#10B981"
           href="/ingresos"
         />
         <StatCard
           label="Gastos este mes"
-          value={<MaskedAmount amount={stats.monthlyExpenses} />}
+          value={<MaskedAmount amount={stats.monthlyExpenses} currency={stats.baseCurrency} />}
           icon={TrendingDown}
           color="#EF4444"
           href="/gastos"
@@ -172,16 +181,47 @@ export default function DashboardPage() {
           subtitle={getHealthLabel(stats.healthScore).label}
           href="/metas"
         />
-        <StatCard
-          label={`Patrimonio neto (${stats.baseCurrency})`}
-          value={<MaskedAmount amount={stats.netWorth} currency={stats.baseCurrency} />}
-          icon={Target}
-          color="#8B5CF6"
-          subtitle={stats.unconvertedWalletCount > 0
-            ? `⚠ ${stats.unconvertedWalletCount} cartera(s) excluida(s) por falta de tasa`
-            : undefined}
-          href="/carteras"
-        />
+      </div>
+
+      {/* Patrimonio neto — desglose completo */}
+      <div className="stat-card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{ background: "#8B5CF620", border: "1px solid #8B5CF630" }}>
+              <Target size={20} style={{ color: "#8B5CF6" }} />
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wider" style={{ color: "#64748B" }}>
+                Patrimonio neto
+              </p>
+              <p className="text-2xl font-bold text-white">
+                {isPrivate ? masked : <MaskedAmount amount={stats.netWorth} currency={stats.baseCurrency} />}
+              </p>
+            </div>
+          </div>
+          {stats.unconvertedWalletCount > 0 && (
+            <span className="text-xs px-2 py-1 rounded-lg" style={{ background: "rgba(245,158,11,0.1)", color: "#F59E0B" }}>
+              ⚠ {stats.unconvertedWalletCount} cartera(s) sin tasa
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: "Carteras",    amount: stats.walletTotal,      color: "#10B981", sign: "+" },
+            { label: "Ahorros",     amount: stats.totalSavings,     color: "#6366F1", sign: "+" },
+            { label: "Inversiones", amount: stats.totalInvestments, color: "#F59E0B", sign: "+" },
+            { label: "Activos",     amount: stats.totalAssets,      color: "#14B8A6", sign: "+" },
+            { label: "Deudas",      amount: stats.totalDebt,        color: "#EF4444", sign: "−" },
+          ].map(({ label, amount, color, sign }) => (
+            <div key={label} className="rounded-xl p-3" style={{ background: `${color}10`, border: `1px solid ${color}20` }}>
+              <p className="text-xs mb-1" style={{ color: "#64748B" }}>{sign} {label}</p>
+              <p className="text-sm font-semibold" style={{ color }}>
+                {isPrivate ? masked : <MaskedAmount amount={amount} currency={stats.baseCurrency} />}
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Gráficos */}
@@ -243,7 +283,7 @@ export default function DashboardPage() {
                     <div className="w-3 h-3 rounded-full" style={{ background: cat.color }} />
                     <span className="text-sm" style={{ color: "#94A3B8" }}>{cat.name}</span>
                   </div>
-                  <MaskedAmount amount={cat.value} className="text-sm font-medium text-white" />
+                  <MaskedAmount amount={cat.value} currency={stats.baseCurrency} className="text-sm font-medium text-white" />
                 </div>
               ))
             ) : (
@@ -264,7 +304,7 @@ export default function DashboardPage() {
                     <p className="text-xs" style={{ color: "#64748B" }}>{formatDate(tx.date)}</p>
                   </div>
                   <span className="text-sm font-semibold ml-3" style={{ color: tx.type === "income" ? "#10B981" : "#EF4444" }}>
-                    {isPrivate ? masked : `${tx.type === "income" ? "+" : "-"}${formatCurrency(tx.amount)}`}
+                    {isPrivate ? masked : `${tx.type === "income" ? "+" : "-"}${formatCurrency(tx.amount, stats.baseCurrency)}`}
                   </span>
                 </div>
               ))

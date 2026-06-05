@@ -19,12 +19,14 @@ export async function POST(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const body = await request.json()
+  const pref = await prisma.userPreference.findUnique({ where: { userId } })
   const saving = await prisma.saving.create({
     data: {
       userId,
       name: body.name,
       institution: body.institution || null,
       type: body.type,
+      currency: body.currency || pref?.baseCurrency || "MXN",
       interestRate: parseFloat(body.interestRate || 0),
       color: body.color || "#10B981",
     },

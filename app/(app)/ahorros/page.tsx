@@ -16,7 +16,7 @@ interface SavingDeposit {
 }
 interface Saving {
   id: string; name: string; institution: string | null
-  type: string; interestRate: number; color: string
+  type: string; currency: string; interestRate: number; color: string
   deposits: SavingDeposit[]
 }
 
@@ -45,6 +45,7 @@ const GrowthTooltip = ({ active, payload, label }: { active?: boolean; payload?:
 export default function AhorrosPage() {
   const [savings, setSavings] = useState<Saving[]>([])
   const [wallets, setWallets] = useState<Wallet[]>([])
+  const [baseCurrency, setBaseCurrency] = useState("MXN")
   const [selected, setSelected] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -54,16 +55,21 @@ export default function AhorrosPage() {
     amount: "", note: "", date: new Date().toISOString().split("T")[0], walletId: "",
   })
   const [savingForm, setSavingForm] = useState({
-    name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0",
+    name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0", currency: "",
   })
 
   const fetchData = () => {
     Promise.all([
       fetch("/api/savings").then((r) => r.json()),
       fetch("/api/wallets").then((r) => r.json()),
-    ]).then(([s, w]) => {
+      fetch("/api/preferences").then((r) => r.json()),
+    ]).then(([s, w, pref]) => {
       setSavings(s)
       setWallets(w)
+      if (pref?.baseCurrency) {
+        setBaseCurrency(pref.baseCurrency)
+        setSavingForm(f => f.currency ? f : { ...f, currency: pref.baseCurrency })
+      }
       if (!selected && s.length > 0) setSelected(s[0].id)
     }).finally(() => setLoading(false))
   }
@@ -77,10 +83,10 @@ export default function AhorrosPage() {
       const res = await fetch("/api/savings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...savingForm, color: COLORS[savings.length % COLORS.length] }),
+        body: JSON.stringify({ ...savingForm, currency: baseCurrency, color: COLORS[savings.length % COLORS.length] }),
       })
       const created: Saving = await res.json()
-      setSavingForm({ name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0" })
+      setSavingForm({ name: "", institution: "", type: SAVING_TYPES[0], interestRate: "0", currency: baseCurrency })
       setShowSavingForm(false)
       fetchData()
       setSelected(created.id)
@@ -201,7 +207,7 @@ export default function AhorrosPage() {
         <div className="glass-card rounded-2xl p-6 mb-6 fade-in">
           <h2 className="text-lg font-semibold text-white mb-4">Nuevo Fondo de Inversión</h2>
           <form onSubmit={handleCreateSaving}>
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
               <div>
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Nombre *</label>
                 <input type="text" required className="input-dark" placeholder="Ej: CETES 2025"
@@ -216,6 +222,24 @@ export default function AhorrosPage() {
                 <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Tipo</label>
                 <select className="input-dark" value={savingForm.type} onChange={(e) => setSavingForm({ ...savingForm, type: e.target.value })}>
                   {SAVING_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>Moneda</label>
+                <select className="input-dark" value={savingForm.currency || baseCurrency}
+                  onChange={(e) => setSavingForm({ ...savingForm, currency: e.target.value })}>
+                  <optgroup label="Fiat">
+                    <option value="MXN">🇲🇽 MXN — Peso Mexicano</option>
+                    <option value="USD">🇺🇸 USD — Dólar</option>
+                    <option value="EUR">🇪🇺 EUR — Euro</option>
+                    <option value="COP">🇨🇴 COP — Peso Colombiano</option>
+                    <option value="ARS">🇦🇷 ARS — Peso Argentino</option>
+                    <option value="CLP">🇨🇱 CLP — Peso Chileno</option>
+                  </optgroup>
+                  <optgroup label="Crypto">
+                    <option value="BTC">₿ BTC — Bitcoin</option>
+                    <option value="ETH">Ξ ETH — Ethereum</option>
+                  </optgroup>
                 </select>
               </div>
               <div>
@@ -304,7 +328,7 @@ export default function AhorrosPage() {
                     <Trash2 size={13} />
                   </button>
                 </div>
-                <div className="grid grid-cols-3 gap-4 mt-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-4">
                   <div>
                     <div className="text-xs mb-1" style={{ color: "#64748B" }}>Capital neto</div>
                     <div className="text-xl font-bold text-white"><MaskedAmount amount={selectedPrincipal} /></div>

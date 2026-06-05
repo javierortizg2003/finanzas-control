@@ -3,6 +3,7 @@ import { Geist } from "next/font/google"
 import "./globals.css"
 import { ClerkProvider } from "@clerk/nextjs"
 import { PrivacyProvider } from "@/components/providers/PrivacyProvider"
+import { PreferencesProvider } from "@/components/providers/PreferencesProvider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +30,9 @@ export default function RootLayout({
       <html lang="es" className={`${geistSans.variable} h-full`}>
         <body className="min-h-full">
           <PrivacyProvider>
-            {children}
+            <PreferencesProvider>
+              {children}
+            </PreferencesProvider>
           </PrivacyProvider>
         </body>
       </html>

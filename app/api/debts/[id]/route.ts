@@ -29,7 +29,7 @@ export async function PUT(
   return NextResponse.json(updated)
 }
 
-// Registrar un abono: reduce el saldo de la deuda automáticamente.
+// Registrar un abono: reduce el saldo y guarda el desglose (capital/interés/seguro).
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -49,11 +49,51 @@ export async function PATCH(
     return NextResponse.json({ error: "Monto de abono inválido" }, { status: 400 })
   }
 
-  // El saldo nunca baja de cero (un abono no puede dejar la deuda en negativo).
-  const newBalance = Math.max(0, debt.balance - payment)
-  const updated = await prisma.debt.update({
-    where: { id },
-    data: { balance: newBalance },
+  const walletId = body.walletId
+  if (!walletId) return NextResponse.json({ error: "walletId es requerido" }, { status: 400 })
+  const wallet = await prisma.wallet.findUnique({ where: { id: walletId } })
+  if (!wallet || wallet.userId !== userId) {
+    return NextResponse.json({ error: "Cartera no encontrada" }, { status: 404 })
+  }
+
+  const lifeIns   = debt.lifeInsurance  ?? 0
+  const debtIns   = debt.debtInsurance  ?? 0
+  const insurance = lifeIns + debtIns
+  const r         = debt.interestRate / 100 / 12
+  // Interés real de este mes sobre el saldo actual
+  const interest  = Math.min(payment, parseFloat((debt.balance * r).toFixed(2)))
+  // Lo que queda después de interés y seguros va a capital
+  const capital   = Math.max(0, Math.min(debt.balance, parseFloat((payment - interest - insurance).toFixed(2))))
+  const newBalance = Math.max(0, parseFloat((debt.balance - capital).toFixed(2)))
+  const date      = body.date ? new Date(body.date) : new Date()
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const debtUpdated = await tx.debt.update({ where: { id }, data: { balance: newBalance } })
+    await tx.debtPayment.create({
+      data: {
+        debtId:       id,
+        amount:       payment,
+        capital,
+        interest,
+        insurance:    Math.min(payment, insurance),
+        balanceAfter: newBalance,
+        date,
+        note: body.note ?? null,
+      },
+    })
+    await tx.wallet.update({ where: { id: walletId }, data: { balance: { increment: -payment } } })
+    await tx.transaction.create({
+      data: {
+        userId,
+        walletId,
+        type:        "expense",
+        amount:      payment,
+        category:    "Deudas",
+        description: `Abono: ${debt.name}`,
+        date,
+      },
+    })
+    return debtUpdated
   })
   return NextResponse.json(updated)
 }

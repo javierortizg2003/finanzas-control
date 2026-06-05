@@ -76,6 +76,7 @@ model Saving {
   name         String
   institution  String?
   type         String
+  currency     String          @default("MXN")
   interestRate Float           @default(0)
   color        String          @default("#10B981")
   createdAt    DateTime        @default(now())
@@ -96,20 +97,35 @@ model SavingDeposit {
 }
 
 model Debt {
-  id              String   @id @default(cuid())
+  id              String        @id @default(cuid())
   userId          String
   name            String
   balance         Float
   originalBalance Float
   interestRate    Float
   minimumPayment  Float
-  type            String   @default("other")
+  type            String        @default("other")
   termMonths      Int?
-  lifeInsurance   Float?   @default(0)
-  debtInsurance   Float?   @default(0)
-  isMixedRate     Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  lifeInsurance   Float?        @default(0)
+  debtInsurance   Float?        @default(0)
+  isMixedRate     Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  payments        DebtPayment[]
+}
+
+model DebtPayment {
+  id           String   @id @default(cuid())
+  debtId       String
+  debt         Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  amount       Float
+  capital      Float
+  interest     Float
+  insurance    Float
+  balanceAfter Float
+  date         DateTime @default(now())
+  note         String?
+  createdAt    DateTime @default(now())
 }
 
 model Goal {
