@@ -226,24 +226,39 @@ export default function CarterasPage() {
 
       {/* Net worth */}
       <div className="glass-card rounded-2xl p-6 mb-8">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-          <div>
+        {/* Patrimonio neto — ocupa toda la fila en móvil */}
+        <div className="mb-5 md:mb-0 md:hidden">
+          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Patrimonio neto</div>
+          <div className="text-4xl font-bold text-emerald-400">
+            <MaskedAmount amount={totalBalance - totalCredit} currency={baseCurrency} />
+          </div>
+          <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Activos - Deudas · {baseCurrency}</div>
+        </div>
+
+        {/* Grid: en móvil 2 cols para activos/deuda, en desktop 3 cols con patrimonio */}
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+          {/* Patrimonio — solo en desktop */}
+          <div className="hidden md:block">
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Patrimonio neto</div>
             <div className="text-3xl font-bold text-emerald-400">
               <MaskedAmount amount={totalBalance - totalCredit} currency={baseCurrency} />
             </div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Activos - Deudas · {baseCurrency}</div>
           </div>
-          <div>
+
+          <div className="p-3 rounded-xl md:p-0 md:rounded-none md:bg-transparent"
+            style={{ background: "rgba(16,185,129,0.06)" }}>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Total activos</div>
-            <div className="text-2xl font-bold text-white">
+            <div className="text-xl md:text-2xl font-bold text-white">
               <MaskedAmount amount={totalBalance} currency={baseCurrency} />
             </div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{wallets.filter(w => w.type !== "CREDIT_CARD").length} cuentas</div>
           </div>
-          <div>
-            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Deuda en crédito</div>
-            <div className="text-2xl font-bold text-red-400">
+
+          <div className="p-3 rounded-xl md:p-0 md:rounded-none md:bg-transparent"
+            style={{ background: "rgba(239,68,68,0.06)" }}>
+            <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Deuda crédito</div>
+            <div className="text-xl md:text-2xl font-bold text-red-400">
               <MaskedAmount amount={totalCredit} currency={baseCurrency} />
             </div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{wallets.filter(w => w.type === "CREDIT_CARD").length} tarjetas</div>
