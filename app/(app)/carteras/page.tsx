@@ -36,9 +36,20 @@ const WALLET_COLORS = [
   "#14B8A6", "#EF4444", "#8B5CF6", "#F97316", "#0EA5E9", "#22C55E",
 ]
 
+function toBase(amount: number, from: string, to: string, rateMap: Map<string, number>): number {
+  if (from === to) return amount
+  const direct = rateMap.get(`${from}→${to}`)
+  if (direct !== undefined) return amount * direct
+  const inverse = rateMap.get(`${to}→${from}`)
+  if (inverse !== undefined && inverse !== 0) return amount / inverse
+  return amount
+}
+
 export default function CarterasPage() {
   const [wallets, setWallets] = useState<WalletData[]>([])
   const [transfers, setTransfers] = useState<Transfer[]>([])
+  const [rateMap, setRateMap] = useState<Map<string, number>>(new Map())
+  const [baseCurrency, setBaseCurrency] = useState("MXN")
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [showTransfer, setShowTransfer] = useState(false)
@@ -58,9 +69,17 @@ export default function CarterasPage() {
     Promise.all([
       fetch("/api/wallets").then((r) => r.json()),
       fetch("/api/transfers").then((r) => r.json()),
-    ]).then(([w, t]) => {
+      fetch("/api/exchange-rates").then((r) => r.json()),
+      fetch("/api/preferences").then((r) => r.json()),
+    ]).then(([w, t, rates, pref]) => {
       setWallets(w)
       setTransfers(t)
+      if (pref?.baseCurrency) setBaseCurrency(pref.baseCurrency)
+      if (Array.isArray(rates)) {
+        const map = new Map<string, number>()
+        for (const r of rates) map.set(`${r.fromCurrency}→${r.toCurrency}`, r.rate)
+        setRateMap(map)
+      }
     }).finally(() => setLoading(false))
   }
 
@@ -165,13 +184,15 @@ export default function CarterasPage() {
     } finally { setSubmitting(false) }
   }
 
+  // All totals converted to baseCurrency
   const totalBalance = wallets
     .filter((w) => w.type !== "CREDIT_CARD")
-    .reduce((s, w) => s + w.balance, 0)
+    .reduce((s, w) => s + toBase(w.balance, w.currency, baseCurrency, rateMap), 0)
 
+  // Credit card debt: always positive (abs) then subtract from net worth
   const totalCredit = wallets
     .filter((w) => w.type === "CREDIT_CARD")
-    .reduce((s, w) => s + w.balance, 0)
+    .reduce((s, w) => s + toBase(Math.abs(w.balance), w.currency, baseCurrency, rateMap), 0)
 
   if (loading) {
     return (
@@ -208,17 +229,23 @@ export default function CarterasPage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
           <div>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Patrimonio neto</div>
-            <div className="text-3xl font-bold text-emerald-400"><MaskedAmount amount={totalBalance + totalCredit} /></div>
-            <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Activos - Deudas</div>
+            <div className="text-3xl font-bold text-emerald-400">
+              <MaskedAmount amount={totalBalance - totalCredit} currency={baseCurrency} />
+            </div>
+            <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>Activos - Deudas · {baseCurrency}</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Total activos</div>
-            <div className="text-2xl font-bold text-white"><MaskedAmount amount={totalBalance} /></div>
+            <div className="text-2xl font-bold text-white">
+              <MaskedAmount amount={totalBalance} currency={baseCurrency} />
+            </div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{wallets.filter(w => w.type !== "CREDIT_CARD").length} cuentas</div>
           </div>
           <div>
             <div className="text-xs uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>Deuda en crédito</div>
-            <div className="text-2xl font-bold text-red-400"><MaskedAmount amount={Math.abs(totalCredit)} /></div>
+            <div className="text-2xl font-bold text-red-400">
+              <MaskedAmount amount={totalCredit} currency={baseCurrency} />
+            </div>
             <div className="text-xs mt-1" style={{ color: "#94A3B8" }}>{wallets.filter(w => w.type === "CREDIT_CARD").length} tarjetas</div>
           </div>
         </div>
