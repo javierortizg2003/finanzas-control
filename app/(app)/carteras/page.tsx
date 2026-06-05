@@ -491,7 +491,10 @@ export default function CarterasPage() {
                     </div>
 
                     <div className={`text-3xl font-bold mb-1 ${wallet.type === "CREDIT_CARD" ? "text-red-400" : "text-white"}`}>
-                      <MaskedAmount amount={wallet.balance} currency={wallet.currency} />
+                      <MaskedAmount
+                        amount={wallet.type === "CREDIT_CARD" ? Math.abs(wallet.balance) : wallet.balance}
+                        currency={wallet.currency}
+                      />
                     </div>
                     {wallet.type === "CREDIT_CARD" && wallet.creditLimit ? (() => {
                       const used = Math.abs(wallet.balance)
