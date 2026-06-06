@@ -504,8 +504,9 @@ export default function GastosPage() {
                       <td className="py-3">
                         <div className="flex gap-1">
                           <button onClick={() => startEdit(tx)}
-                            className="btn-ghost p-1.5" title="Editar">
-                            <Pencil size={14} style={{ color: "#64748B" }} />
+                            className="p-1.5 rounded-lg transition-colors" title="Editar"
+                            style={{ background: "rgba(99,102,241,0.15)", color: "#818CF8" }}>
+                            <Pencil size={14} />
                           </button>
                           <button onClick={() => handleDelete(tx.id)} className="btn-danger p-1.5" title="Eliminar">
                             <Trash2 size={14} />

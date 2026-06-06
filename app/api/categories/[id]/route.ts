@@ -17,9 +17,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
+  const data: { macro?: string | null; name?: string; color?: string } = {}
+  if ("macro" in body) data.macro = body.macro ?? null
+  if (body.name?.trim()) data.name = body.name.trim()
+  if (body.color) data.color = body.color
+
   const updated = await prisma.category.update({
     where: { id },
-    data: { macro: body.macro ?? null },
+    data,
   })
   return NextResponse.json(updated)
 }
