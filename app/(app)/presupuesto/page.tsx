@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import {
   BarChart3, Flame, Save, CheckCircle2, AlertTriangle,
   Home, Sparkles, PiggyBank, Info,
   ShieldCheck, Zap, Globe, DollarSign, Settings2,
+  ChevronDown, Calendar, Copy,
 } from "lucide-react"
 import Link from "next/link"
 import { formatCurrency, calculateFIRENumber, calculateYearsToFIRE, formatPercent } from "@/lib/utils"
@@ -48,18 +49,7 @@ const barColor = (pct: number) => {
   return "#10B981"
 }
 
-/* ─── Mini stacked bar ─── */
-function RuleBar({ needsPct, wantsPct, savingsPct, height = 6 }: BudgetRule & { height?: number }) {
-  return (
-    <div className="flex rounded-full overflow-hidden" style={{ height, gap: 2 }}>
-      <div style={{ flex: needsPct,   background: "#10B981" }} />
-      <div style={{ flex: wantsPct,   background: "#6366F1" }} />
-      <div style={{ flex: savingsPct, background: "#F59E0B" }} />
-    </div>
-  )
-}
-
-/* ─── Stacked bar ─── */
+/* ─── Stacked bar (macro colors) ─── */
 function StackedBar({ segments, totalBudget, height = 10 }: {
   segments: { amount: number; color: string; name: string }[]
   totalBudget: number
@@ -77,7 +67,18 @@ function StackedBar({ segments, totalBudget, height = 10 }: {
   )
 }
 
-/* ─── Mi Presupuesto overview ─── */
+/* ─── Mini stacked bar (rule) ─── */
+function RuleBar({ needsPct, wantsPct, savingsPct, height = 6 }: BudgetRule & { height?: number }) {
+  return (
+    <div className="flex rounded-full overflow-hidden" style={{ height, gap: 2 }}>
+      <div style={{ flex: needsPct,   background: "#10B981" }} />
+      <div style={{ flex: wantsPct,   background: "#6366F1" }} />
+      <div style={{ flex: savingsPct, background: "#F59E0B" }} />
+    </div>
+  )
+}
+
+/* ─── Mi Presupuesto ─── */
 function MiPresupuesto({ cats, byMacroLocal, month }: {
   cats: CatRow[]
   byMacroLocal: Record<string, MacroTotals>
@@ -87,8 +88,9 @@ function MiPresupuesto({ cats, byMacroLocal, month }: {
   const totalActual = cats.reduce((s, c) => s + c.actualQ1 + c.actualQ2, 0)
   const surplus     = totalBudget - totalActual
   const totalPct    = totalBudget > 0 ? Math.min((totalActual / totalBudget) * 100, 100) : 0
+  const hasData     = totalBudget > 0 || totalActual > 0
 
-  if (totalBudget === 0) return (
+  if (!hasData) return (
     <div className="glass-card rounded-2xl p-5">
       <div className="flex items-center gap-2 mb-2">
         <BarChart3 size={15} style={{ color: "#F59E0B" }} />
@@ -96,60 +98,68 @@ function MiPresupuesto({ cats, byMacroLocal, month }: {
         <span className="text-xs" style={{ color: "#475569" }}>· {month}</span>
       </div>
       <p className="text-xs" style={{ color: "#475569" }}>
-        Asigna montos en el desglose de abajo para ver tu resumen aquí.
+        Aún no hay gastos ni presupuesto registrado para este mes.
       </p>
     </div>
   )
 
   return (
     <div className="glass-card rounded-2xl p-5 space-y-4">
-      {/* Title + overall surplus */}
+      {/* Title + surplus chip */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <BarChart3 size={15} style={{ color: "#F59E0B" }} />
           <h2 className="text-sm font-semibold text-white">Mi Presupuesto</h2>
           <span className="text-xs" style={{ color: "#475569" }}>· {month}</span>
         </div>
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
-          style={{ background: surplus >= 0 ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.1)" }}>
-          <span className="text-xs" style={{ color: surplus >= 0 ? "#10B981" : "#EF4444" }}>
-            {surplus >= 0 ? "Te sobran" : "Te pasaste"}
-          </span>
-          <span className="text-sm font-bold" style={{ color: surplus >= 0 ? "#10B981" : "#EF4444" }}>
-            <MaskedAmount amount={Math.abs(surplus)} />
-          </span>
-        </div>
+        {totalBudget > 0 && (
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full"
+            style={{ background: surplus >= 0 ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.1)" }}>
+            <span className="text-xs" style={{ color: surplus >= 0 ? "#10B981" : "#EF4444" }}>
+              {surplus >= 0 ? "Te sobran" : "Te pasaste"}
+            </span>
+            <span className="text-sm font-bold" style={{ color: surplus >= 0 ? "#10B981" : "#EF4444" }}>
+              <MaskedAmount amount={Math.abs(surplus)} />
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Overall stacked bar — grouped by macro so colors are clear */}
-      <div className="space-y-1.5">
-        <div className="flex justify-between text-xs">
-          <span style={{ color: "#64748B" }}>Gastado: <MaskedAmount amount={totalActual} /></span>
-          <span style={{ color: "#64748B" }}>{Math.round(totalPct)}% de <MaskedAmount amount={totalBudget} /></span>
+      {/* Overall bar or simple total */}
+      {totalBudget > 0 ? (
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-xs">
+            <span style={{ color: "#64748B" }}>Gastado: <MaskedAmount amount={totalActual} /></span>
+            <span style={{ color: "#64748B" }}>{Math.round(totalPct)}% de <MaskedAmount amount={totalBudget} /></span>
+          </div>
+          <StackedBar
+            segments={MACROS.map((m) => {
+              const t = byMacroLocal[m.key] ?? { actualQ1: 0, actualQ2: 0, budgetQ1: 0, budgetQ2: 0 }
+              return { amount: t.actualQ1 + t.actualQ2, color: m.color, name: m.label }
+            })}
+            totalBudget={totalBudget}
+            height={12}
+          />
+          <div className="flex gap-4 pt-0.5">
+            {MACROS.map((m) => {
+              const t = byMacroLocal[m.key] ?? { actualQ1: 0, actualQ2: 0 }
+              if ((t.actualQ1 + t.actualQ2) === 0) return null
+              return (
+                <span key={m.key} className="flex items-center gap-1 text-xs" style={{ color: "#64748B" }}>
+                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.color }} />
+                  {m.label}
+                </span>
+              )
+            })}
+          </div>
         </div>
-        <StackedBar
-          segments={MACROS.map((m) => {
-            const t = byMacroLocal[m.key] ?? { actualQ1: 0, actualQ2: 0, budgetQ1: 0, budgetQ2: 0 }
-            return { amount: t.actualQ1 + t.actualQ2, color: m.color, name: m.label }
-          })}
-          totalBudget={totalBudget}
-          height={12}
-        />
-        {/* Legend */}
-        <div className="flex gap-4 pt-0.5">
-          {MACROS.map((m) => {
-            const t = byMacroLocal[m.key] ?? { actualQ1: 0, actualQ2: 0, budgetQ1: 0, budgetQ2: 0 }
-            const a = t.actualQ1 + t.actualQ2
-            if (a === 0) return null
-            return (
-              <span key={m.key} className="flex items-center gap-1 text-xs" style={{ color: "#64748B" }}>
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: m.color }} />
-                {m.label}
-              </span>
-            )
-          })}
+      ) : (
+        <div className="flex items-center justify-between p-3 rounded-xl"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <span className="text-xs" style={{ color: "#64748B" }}>Total gastado este mes</span>
+          <span className="text-base font-bold text-white"><MaskedAmount amount={totalActual} /></span>
         </div>
-      </div>
+      )}
 
       {/* Per-macro cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -157,10 +167,11 @@ function MiPresupuesto({ cats, byMacroLocal, month }: {
           const t      = byMacroLocal[macro.key] ?? { budgetQ1: 0, budgetQ2: 0, actualQ1: 0, actualQ2: 0 }
           const budget = t.budgetQ1 + t.budgetQ2
           const actual = t.actualQ1 + t.actualQ2
-          const pct    = budget > 0 ? Math.min((actual / budget) * 100, 100) : 0
-          const color  = barColor(pct)
-          const left   = budget - actual
-          const macroCats = cats.filter((c) => c.macro === macro.key && (c.budgetQ1 + c.budgetQ2) > 0)
+          if (budget === 0 && actual === 0) return null
+
+          const pct  = budget > 0 ? Math.min((actual / budget) * 100, 100) : 0
+          const left = budget - actual
+          const macroCats = cats.filter((c) => c.macro === macro.key && (c.actualQ1 + c.actualQ2 + c.budgetQ1 + c.budgetQ2) > 0)
 
           return (
             <div key={macro.key} className="rounded-xl p-3.5 space-y-2.5"
@@ -184,6 +195,7 @@ function MiPresupuesto({ cats, byMacroLocal, month }: {
                 )}
               </div>
 
+              {/* Bar or spending-only */}
               {budget > 0 ? (
                 <>
                   <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
@@ -194,50 +206,65 @@ function MiPresupuesto({ cats, byMacroLocal, month }: {
                     <span style={{ color: "#94A3B8" }}><MaskedAmount amount={actual} /></span>
                     <span style={{ color: "#64748B" }}>{Math.round(pct)}% / <MaskedAmount amount={budget} /></span>
                   </div>
+                </>
+              ) : (
+                <div className="flex justify-between text-xs">
+                  <span style={{ color: "#64748B" }}>Gastado</span>
+                  <span className="font-semibold text-white"><MaskedAmount amount={actual} /></span>
+                </div>
+              )}
 
-                  {/* Per-category mini bars */}
-                  {macroCats.length > 0 && (
-                    <div className="space-y-2.5 pt-2 border-t" style={{ borderColor: `${macro.color}18` }}>
-                      {macroCats.map((c) => {
-                        const cb     = c.budgetQ1 + c.budgetQ2
-                        const ca     = c.actualQ1 + c.actualQ2
-                        const cp     = Math.min((ca / cb) * 100, 100)
-                        const sobra  = cb - ca
-                        const over   = ca > cb
-                        return (
-                          <div key={c.name}>
-                            {/* Name + % */}
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="flex items-center gap-1.5 min-w-0 truncate text-xs font-medium" style={{ color: "#CBD5E1" }}>
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
-                                <span className="truncate">{c.name}</span>
-                              </span>
-                              <span className="text-xs shrink-0 ml-2 font-semibold"
-                                style={{ color: over ? "#EF4444" : c.color }}>
-                                {Math.round(cp)}%
-                              </span>
-                            </div>
-                            {/* Labels */}
-                            <div className="flex justify-between text-xs mb-1" style={{ color: "#475569" }}>
+              {/* Per-category mini section */}
+              {macroCats.length > 0 && (
+                <div className="space-y-2.5 pt-2 border-t" style={{ borderColor: `${macro.color}18` }}>
+                  {macroCats.map((c) => {
+                    const cb   = c.budgetQ1 + c.budgetQ2
+                    const ca   = c.actualQ1 + c.actualQ2
+                    if (ca === 0 && cb === 0) return null
+                    const cp   = cb > 0 ? Math.min((ca / cb) * 100, 100) : 0
+                    const over = cb > 0 && ca > cb
+
+                    return (
+                      <div key={c.name}>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="flex items-center gap-1.5 min-w-0 truncate text-xs font-medium" style={{ color: "#CBD5E1" }}>
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+                            <span className="truncate">{c.name}</span>
+                          </span>
+                          {cb > 0 && (
+                            <span className="text-xs shrink-0 ml-2 font-semibold"
+                              style={{ color: over ? "#EF4444" : c.color }}>
+                              {Math.round(cp)}%
+                            </span>
+                          )}
+                        </div>
+                        {/* Labels */}
+                        <div className="flex justify-between text-xs mb-1" style={{ color: "#475569" }}>
+                          {cb > 0 ? (
+                            <>
                               <span>Presupuesto: <MaskedAmount amount={cb} /></span>
                               <span>Gastado: <MaskedAmount amount={ca} /></span>
                               <span style={{ color: over ? "#EF4444" : "#10B981" }}>
-                                {over ? "Exceso" : "Sobra"}: <MaskedAmount amount={Math.abs(sobra)} />
+                                {over ? "Exceso" : "Sobra"}: <MaskedAmount amount={Math.abs(cb - ca)} />
                               </span>
-                            </div>
-                            {/* Bar in category color */}
-                            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
-                              <div className="h-full rounded-full transition-all duration-300"
-                                style={{ width: `${cp}%`, background: over ? "#EF4444" : c.color }} />
-                            </div>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ color: "#64748B" }}>Sin presupuesto</span>
+                              <span className="font-medium text-white">Gastado: <MaskedAmount amount={ca} /></span>
+                            </>
+                          )}
+                        </div>
+                        {cb > 0 && (
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                            <div className="h-full rounded-full transition-all duration-300"
+                              style={{ width: `${cp}%`, background: over ? "#EF4444" : c.color }} />
                           </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-xs" style={{ color: "#475569" }}>Sin presupuesto asignado</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
               )}
             </div>
           )
@@ -255,6 +282,12 @@ function BudgetCell({ cat, half, monthNum, year, onSave }: {
   const initial = half === 1 ? cat.budgetQ1 : cat.budgetQ2
   const [val, setVal] = useState(initial > 0 ? initial.toString() : "")
   const prev    = useRef(initial)
+
+  useEffect(() => {
+    const v = half === 1 ? cat.budgetQ1 : cat.budgetQ2
+    setVal(v > 0 ? v.toString() : "")
+    prev.current = v
+  }, [cat.budgetQ1, cat.budgetQ2, half])
 
   const handleBlur = async () => {
     const amount = parseFloat(val) || 0
@@ -465,30 +498,69 @@ export default function PresupuestoPage() {
   const [ruleSaving,     setRuleSaving]     = useState(false)
   const [ruleSaved,      setRuleSaved]      = useState(false)
   const [expectedSalary, setExpectedSalary] = useState("")
-
+  // month selector
+  const [selMonth,       setSelMonth]       = useState<{ month: number; year: number } | null>(null)
+  const [availMonths,    setAvailMonths]    = useState<{ month: number; year: number }[]>([])
+  const [showPicker,     setShowPicker]     = useState(false)
+  const [copying,        setCopying]        = useState(false)
+  const [copiedOk,       setCopiedOk]       = useState(false)
   // FIRE
   const [monthlyExpenses, setMonthlyExpenses] = useState("")
   const [currentSavings,  setCurrentSavings]  = useState("")
   const [monthlySavings,  setMonthlySavings]  = useState("")
 
+  const nowRef   = new Date()
+  const viewMonth = selMonth ?? { month: nowRef.getMonth() + 1, year: nowRef.getFullYear() }
+  const isCurrentMonth = !selMonth
+
+  const monthLabel = (m: number, y: number) => {
+    const s = new Date(y, m - 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" })
+    return s.charAt(0).toUpperCase() + s.slice(1)
+  }
+
+  const fetchSummary = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [s, r]: [Summary, BudgetRule] = await Promise.all([
+        fetch(`/api/budget/summary?month=${viewMonth.month}&year=${viewMonth.year}`).then((r) => r.json()),
+        fetch("/api/budget-rule").then((r) => r.json()),
+      ])
+      setSummary(s)
+      setCats(s.categories ?? [])
+      const match = PRESETS.find((p) => p.rule.needsPct === r.needsPct && p.rule.wantsPct === r.wantsPct && p.rule.savingsPct === r.savingsPct)
+      setActivePreset(match?.key ?? "50-30-20")
+    } finally { setLoading(false) }
+  }, [viewMonth.month, viewMonth.year])
+
   useEffect(() => {
     const saved = localStorage.getItem("expectedSalary")
     if (saved) setExpectedSalary(saved)
-
-    Promise.all([
-      fetch("/api/budget/summary").then((r) => r.json()),
-      fetch("/api/budget-rule").then((r) => r.json()),
-    ]).then(([s, r]: [Summary, BudgetRule]) => {
-      setSummary(s)
-      setCats(s.categories ?? [])
-      const match = PRESETS.find(
-        (p) => p.rule.needsPct === r.needsPct &&
-               p.rule.wantsPct === r.wantsPct &&
-               p.rule.savingsPct === r.savingsPct
-      )
-      setActivePreset(match?.key ?? "50-30-20")
-    }).finally(() => setLoading(false))
+    fetch("/api/budget/months").then((r) => r.json()).then(setAvailMonths).catch(() => {})
   }, [])
+
+  useEffect(() => { fetchSummary() }, [fetchSummary])
+
+  const handleCopyPrevMonth = async () => {
+    setCopying(true)
+    try {
+      const prev = viewMonth.month === 1
+        ? { month: 12, year: viewMonth.year - 1 }
+        : { month: viewMonth.month - 1, year: viewMonth.year }
+      const prevData: Summary = await fetch(`/api/budget/summary?month=${prev.month}&year=${prev.year}`).then((r) => r.json())
+      const hasBudget = prevData.categories.some((c) => c.budgetQ1 > 0 || c.budgetQ2 > 0)
+      if (!hasBudget) { alert(`${monthLabel(prev.month, prev.year)} no tiene presupuesto guardado.`); return }
+      const reqs: Promise<Response>[] = prevData.categories.flatMap((c) => {
+        const out: Promise<Response>[] = []
+        if (c.budgetQ1 > 0) out.push(fetch("/api/budget/categories", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category: c.name, amount: c.budgetQ1, month: viewMonth.month, year: viewMonth.year, half: 1 }) }))
+        if (c.budgetQ2 > 0) out.push(fetch("/api/budget/categories", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category: c.name, amount: c.budgetQ2, month: viewMonth.month, year: viewMonth.year, half: 2 }) }))
+        return out
+      })
+      await Promise.all(reqs)
+      await fetchSummary()
+      setCopiedOk(true)
+      setTimeout(() => setCopiedOk(false), 2500)
+    } finally { setCopying(false) }
+  }
 
   const handleBudgetSave = (name: string, half: 1 | 2, amount: number) =>
     setCats((prev) => prev.map((c) =>
@@ -503,11 +575,7 @@ export default function PresupuestoPage() {
   const handleSaveRule = async () => {
     setRuleSaving(true)
     try {
-      await fetch("/api/budget-rule", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(currentRule),
-      })
+      await fetch("/api/budget-rule", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(currentRule) })
       setRuleSaved(true)
       setTimeout(() => setRuleSaved(false), 2500)
     } finally { setRuleSaving(false) }
@@ -547,11 +615,53 @@ export default function PresupuestoPage() {
             Define cuánto esperas gastar en cada quincena y compara con lo real
           </p>
         </div>
-        <Link href="/presupuesto/categorias"
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all shrink-0"
-          style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#F59E0B" }}>
-          <Settings2 size={14} /> Personalizar categorías
-        </Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Month selector */}
+          <div className="relative">
+            <button onClick={() => setShowPicker(!showPicker)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", color: "#CBD5E1" }}>
+              <Calendar size={13} style={{ color: "#64748B" }} />
+              {monthLabel(viewMonth.month, viewMonth.year)}
+              <ChevronDown size={13} style={{ color: "#64748B" }} />
+            </button>
+            {showPicker && (
+              <div className="absolute top-full mt-1 right-0 z-50 rounded-xl overflow-hidden min-w-48 shadow-xl"
+                style={{ background: "#1E293B", border: "1px solid rgba(255,255,255,0.1)" }}>
+                {availMonths.map((m) => {
+                  const isSel = m.month === viewMonth.month && m.year === viewMonth.year
+                  return (
+                    <button key={`${m.year}-${m.month}`}
+                      onClick={() => { setSelMonth(m.month === nowRef.getMonth() + 1 && m.year === nowRef.getFullYear() ? null : m); setShowPicker(false) }}
+                      className="w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-white/5"
+                      style={{ color: isSel ? "#F59E0B" : "#CBD5E1", background: isSel ? "rgba(245,158,11,0.08)" : "transparent" }}>
+                      {monthLabel(m.month, m.year)}
+                      {m.month === nowRef.getMonth() + 1 && m.year === nowRef.getFullYear() && (
+                        <span className="ml-2 text-xs" style={{ color: "#475569" }}>· actual</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Copy prev month */}
+          {isCurrentMonth && (
+            <button onClick={handleCopyPrevMonth} disabled={copying}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all"
+              style={{ background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.25)", color: "#818CF8" }}>
+              <Copy size={13} />
+              {copying ? "Copiando..." : copiedOk ? "¡Copiado!" : "Copiar mes anterior"}
+            </button>
+          )}
+
+          <Link href="/presupuesto/categorias"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all shrink-0"
+            style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#F59E0B" }}>
+            <Settings2 size={13} /> Categorías
+          </Link>
+        </div>
       </div>
 
       {/* Expected salary + real income */}
@@ -568,16 +678,10 @@ export default function PresupuestoPage() {
             <div className="relative">
               <span className="absolute left-3 top-2.5 text-sm" style={{ color: "#475569" }}>$</span>
               <input type="number" min="0" step="100" placeholder="Ej: 20000"
-                className="input-dark pl-7"
-                value={expectedSalary}
-                onChange={(e) => {
-                  setExpectedSalary(e.target.value)
-                  localStorage.setItem("expectedSalary", e.target.value)
-                }} />
+                className="input-dark pl-7" value={expectedSalary}
+                onChange={(e) => { setExpectedSalary(e.target.value); localStorage.setItem("expectedSalary", e.target.value) }} />
             </div>
-            <p className="text-xs mt-1" style={{ color: "#475569" }}>
-              Usado para calcular los objetivos de cada grupo
-            </p>
+            <p className="text-xs mt-1" style={{ color: "#475569" }}>Usado para calcular los objetivos de cada grupo</p>
           </div>
           <div className="p-3 rounded-xl" style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.15)" }}>
             <p className="text-xs mb-1" style={{ color: "#64748B" }}>Ingresos reales este mes</p>
@@ -596,12 +700,12 @@ export default function PresupuestoPage() {
         </div>
       </div>
 
-      {/* ─── Mi Presupuesto ─── */}
+      {/* Mi Presupuesto */}
       {!loading && summary && (
         <MiPresupuesto cats={cats} byMacroLocal={byMacroLocal} month={summary.month} />
       )}
 
-      {/* ─── Category breakdown ─── */}
+      {/* Category breakdown */}
       {loading ? (
         <div className="glass-card rounded-2xl p-16 flex items-center justify-center">
           <div className="w-8 h-8 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
@@ -619,45 +723,31 @@ export default function PresupuestoPage() {
           {MACROS.map((macro) => {
             const macroTotals = byMacroLocal[macro.key] ?? { budgetQ1: 0, budgetQ2: 0, actualQ1: 0, actualQ2: 0 }
             return (
-              <MacroSection
-                key={macro.key}
-                macro={macro}
+              <MacroSection key={macro.key} macro={macro}
                 cats={classified.filter((c) => c.macro === macro.key)}
-                totals={macroTotals}
-                monthNum={summary.monthNum}
-                year={summary.year}
-                onBudgetSave={handleBudgetSave}
-              />
+                totals={macroTotals} monthNum={summary.monthNum} year={summary.year}
+                onBudgetSave={handleBudgetSave} />
             )
           })}
-          <UnclassifiedSection
-            cats={unclassified}
-            monthNum={summary.monthNum}
-            year={summary.year}
-            onAssign={handleAssignMacro}
-            onBudgetSave={handleBudgetSave}
-          />
+          <UnclassifiedSection cats={unclassified} monthNum={summary.monthNum} year={summary.year}
+            onAssign={handleAssignMacro} onBudgetSave={handleBudgetSave} />
         </div>
       ) : null}
 
-      {/* ─── Distribution rule (secondary) ─── */}
+      {/* Distribution rule */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <div className="flex items-center gap-2">
           <BarChart3 size={15} style={{ color: "#F59E0B" }} />
           <h2 className="text-sm font-semibold text-white">Regla de distribución</h2>
           <span className="text-xs ml-1" style={{ color: "#475569" }}>— referencia de % por grupo</span>
         </div>
-
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none" }}>
           {PRESETS.map((p) => {
             const active = activePreset === p.key
             return (
               <button key={p.key} onClick={() => setActivePreset(p.key)}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl whitespace-nowrap transition-all shrink-0"
-                style={{
-                  background: active ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.04)",
-                  border: `1px solid ${active ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}`,
-                }}>
+                style={{ background: active ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.04)", border: `1px solid ${active ? "rgba(245,158,11,0.45)" : "rgba(255,255,255,0.07)"}` }}>
                 <p.Icon size={12} style={{ color: active ? "#F59E0B" : "#64748B" }} />
                 <span className="text-xs font-semibold" style={{ color: active ? "#F59E0B" : "#94A3B8" }}>{p.label}</span>
                 <span className="text-xs" style={{ color: active ? "rgba(245,158,11,0.7)" : "#475569" }}>{p.desc}</span>
@@ -665,9 +755,7 @@ export default function PresupuestoPage() {
             )
           })}
         </div>
-
-        <div className="rounded-2xl p-4 space-y-3"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="rounded-2xl p-4 space-y-3" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
           <RuleBar {...currentRule} height={10} />
           <div className="grid grid-cols-3 gap-3">
             {[
@@ -678,47 +766,36 @@ export default function PresupuestoPage() {
               const pct = currentRule[key]
               const amt = income * pct / 100
               return (
-                <div key={key} className="rounded-xl p-3"
-                  style={{ background: `${color}0D`, border: `1px solid ${color}22` }}>
+                <div key={key} className="rounded-xl p-3" style={{ background: `${color}0D`, border: `1px solid ${color}22` }}>
                   <div className="flex items-center gap-1.5 mb-1">
                     <Icon size={12} style={{ color }} />
                     <span className="text-xs" style={{ color: "#94A3B8" }}>{label}</span>
                   </div>
                   <p className="text-xl font-bold" style={{ color }}>{pct}%</p>
-                  <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
-                    {income > 0 ? formatCurrency(amt) : "—"}
-                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>{income > 0 ? formatCurrency(amt) : "—"}</p>
                 </div>
               )
             })}
           </div>
         </div>
-
         <div className="flex items-center gap-3">
           <button onClick={handleSaveRule} disabled={ruleSaving}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all"
             style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.25)", color: "#F59E0B" }}>
             <Save size={13} />{ruleSaving ? "Guardando..." : "Guardar regla"}
           </button>
-          {ruleSaved && (
-            <span className="flex items-center gap-1 text-xs" style={{ color: "#10B981" }}>
-              <CheckCircle2 size={13} /> Guardado
-            </span>
-          )}
+          {ruleSaved && <span className="flex items-center gap-1 text-xs" style={{ color: "#10B981" }}><CheckCircle2 size={13} /> Guardado</span>}
         </div>
       </div>
 
-      {/* ─── FIRE Calculator ─── */}
+      {/* FIRE Calculator */}
       <div className="glass-card rounded-2xl p-5">
         <div className="flex items-center gap-2 mb-5">
           <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: "rgba(239,68,68,0.12)" }}>
             <Flame size={14} style={{ color: "#EF4444" }} />
           </div>
           <h2 className="text-sm font-semibold text-white">Calculadora FIRE</h2>
-          <span className="text-xs px-2 py-0.5 rounded-full ml-1"
-            style={{ background: "rgba(239,68,68,0.1)", color: "#F87171" }}>
-            Financial Independence
-          </span>
+          <span className="text-xs px-2 py-0.5 rounded-full ml-1" style={{ background: "rgba(239,68,68,0.1)", color: "#F87171" }}>Financial Independence</span>
         </div>
         <div className="grid lg:grid-cols-3 gap-4 mb-5">
           {[
@@ -728,8 +805,7 @@ export default function PresupuestoPage() {
           ].map(({ label, val, set, ph }) => (
             <div key={label}>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#94A3B8" }}>{label}</label>
-              <input type="number" className="input-dark" placeholder={`Ej: ${ph}`}
-                value={val} onChange={(e) => set(e.target.value)} />
+              <input type="number" className="input-dark" placeholder={`Ej: ${ph}`} value={val} onChange={(e) => set(e.target.value)} />
             </div>
           ))}
         </div>
@@ -761,15 +837,12 @@ export default function PresupuestoPage() {
             )}
           </div>
         ) : (
-          <p className="text-sm text-center py-4" style={{ color: "#475569" }}>
-            Ingresa tus gastos mensuales para calcular
-          </p>
+          <p className="text-sm text-center py-4" style={{ color: "#475569" }}>Ingresa tus gastos mensuales para calcular</p>
         )}
         <div className="mt-4 flex items-start gap-2 p-3 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }}>
           <Info size={13} className="mt-0.5 shrink-0" style={{ color: "#475569" }} />
           <p className="text-xs" style={{ color: "#64748B" }}>
-            <strong className="text-white">Regla del 4%:</strong> Tu Número FIRE es 25× tus gastos anuales.
-            Si retiras el 4% anual, el portafolio dura indefinidamente.
+            <strong className="text-white">Regla del 4%:</strong> Tu Número FIRE es 25× tus gastos anuales. Si retiras el 4% anual, el portafolio dura indefinidamente.
           </p>
         </div>
       </div>

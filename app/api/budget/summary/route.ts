@@ -43,9 +43,10 @@ export async function GET(request: NextRequest) {
 
   await ensureMigrated()
 
+  const { searchParams } = new URL(request.url)
   const now     = new Date()
-  const month   = now.getMonth() + 1
-  const year    = now.getFullYear()
+  const month   = searchParams.get("month") ? parseInt(searchParams.get("month")!) : now.getMonth() + 1
+  const year    = searchParams.get("year")  ? parseInt(searchParams.get("year")!)  : now.getFullYear()
   const lastDay = new Date(year, month, 0).getDate()
 
   const startOfMonth = new Date(year, month - 1, 1)
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
     categories: catRows,
     byMacro,
     rule: rule ?? { needsPct: 50, wantsPct: 30, savingsPct: 20 },
-    month: now.toLocaleDateString("es-MX", { month: "long", year: "numeric" }),
+    month: new Date(year, month - 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" }),
     monthNum: month,
     year,
     lastDay,
